@@ -39,6 +39,10 @@ type Config struct {
 type Service interface {
 	Start(ctx context.Context) error
 	Stop() error
+	// Apply pushes a desired state through the same validate-then-apply
+	// pipeline as PUT /v1/state. Used at startup for --config; on failure
+	// the kernel is rolled back to empty.
+	Apply(ctx context.Context, desired state.State) error
 }
 
 // NewService validates cfg and returns a Service. Start does the actual
@@ -102,6 +106,23 @@ func (s *service) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.srv.Shutdown(ctx)
+}
+
+// Apply validates and applies desired state outside the HTTP path. Used by
+// the --config startup flag; on failure the kernel is rolled back to empty
+// (same contract as PUT /v1/state).
+func (s *service) Apply(ctx context.Context, desired state.State) error {
+	if err := desired.Validate(); err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.applyLocked(ctx, desired); err != nil {
+		s.applied = state.State{}
+		return err
+	}
+	s.applied = desired
+	return nil
 }
 
 func (s *service) handleHealth(w http.ResponseWriter, _ *http.Request) {

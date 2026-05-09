@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ethpandaops/disruptoor/schemas/v1-state.json",
+  "title": "Disruptoor v1 State",
+  "description": "Body of PUT /v1/state and the canonical schema for files passed to --config. The same shape is returned by GET /v1/state, reflecting applied (not requested) state.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "partitions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/partition" }
+    },
+    "shaping": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/shaping" }
+    }
+  },
+  "$defs": {
+    "selector": {
+      "description": "Either the literal string \"all\" (matches every container in the enclave) or a label-match object: keys are label suffixes (the configured label-prefix is prepended for keys without a dot), values are string/number/array-of-either. Multiple values OR within a key; multiple keys AND across keys.",
+      "oneOf": [
+        { "type": "string", "const": "all" },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "number" },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "oneOf": [
+                    { "type": "string" },
+                    { "type": "number" }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "scope": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": ["cl_p2p", "el_p2p", "include_control"]
+      }
+    },
+    "partition": {
+      "type": "object",
+      "required": ["name", "groups"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "groups": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/selector" }
+        },
+        "scope": {
+          "$ref": "#/$defs/scope",
+          "description": "Defaults to [cl_p2p, el_p2p] when omitted."
+        },
+        "symmetric": {
+          "type": "boolean",
+          "description": "Defaults to true. False blocks A→B but leaves B→A open."
+        }
+      }
+    },
+    "shaping": {
+      "type": "object",
+      "required": ["name", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "target": {
+          "$ref": "#/$defs/selector",
+          "description": "v0: target is required (between is reserved for future use)."
+        },
+        "between": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/selector" },
+          "description": "Reserved. v0 rejects any non-empty between."
+        },
+        "scope": {
+          "$ref": "#/$defs/scope",
+          "description": "v0 tc shaping affects all egress traffic. Must be set to [\"include_control\"] to acknowledge."
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["egress"],
+          "description": "v0: only egress is supported. Ingress/both require ifb redirects (not implemented)."
+        },
+        "delay":     { "type": "string", "description": "Go duration, e.g. \"200ms\"." },
+        "jitter":    { "type": "string", "description": "Go duration; requires delay." },
+        "loss":      { "type": "string", "description": "Percent string, e.g. \"5%\"." },
+        "bandwidth": { "type": "string", "description": "Rate string, e.g. \"1mbit\"." }
+      },
+      "anyOf": [
+        { "required": ["delay"] },
+        { "required": ["loss"] },
+        { "required": ["bandwidth"] }
+      ]
+    }
+  }
+}

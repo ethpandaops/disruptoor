@@ -1,0 +1,25 @@
+# Example --config file for the docker-compose.test.yml smoke harness.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up --build
+#   # then add `--config /examples/disruption.yaml` to the disruptoor service
+#   # command, mounting this file in.
+#
+# Schema: schemas/v1-state.json. Wire format identical to PUT /v1/state.
+
+partitions:
+  - name: alpha-vs-bravo
+    groups:
+      - { id: alpha }
+      - { id: bravo }
+    # scope omitted → defaults to [cl_p2p, el_p2p]
+    # symmetric omitted → defaults to true
+
+shaping:
+  - name: jitter-everything
+    target: all
+    # v0 tc shaping affects all egress traffic, including RPC/engine/metrics.
+    # Acknowledge by setting scope to include_control.
+    scope: [include_control]
+    delay: 50ms
+    jitter: 10ms

@@ -61,6 +61,16 @@ Heal everything:
 curl -X POST http://localhost:7700/v1/state/clear
 ```
 
+### Initial state from a config file
+
+`--config <path>` loads desired state from a YAML or JSON file at startup and applies it before the HTTP API begins serving. Format is autodetected from the extension (`.yaml`, `.yml`, `.json`). Validation errors abort startup with a non-zero exit; nothing is left half-applied.
+
+```bash
+disruptoor --config /etc/disruptoor/init.yaml
+```
+
+The wire format is identical to `PUT /v1/state` — see [`examples/disruption.yaml`](./examples/disruption.yaml) for a worked example, and [`schemas/v1-state.json`](./schemas/v1-state.json) for the JSON Schema (suitable for parse-time validation in upstream callers like the ethereum-package).
+
 ### Use the published image
 
 ```bash

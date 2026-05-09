@@ -18,6 +18,7 @@ import (
 	"github.com/ethpandaops/disruptoor/internal/backend/conntrack"
 	"github.com/ethpandaops/disruptoor/internal/backend/iptables"
 	"github.com/ethpandaops/disruptoor/internal/backend/tc"
+	"github.com/ethpandaops/disruptoor/internal/config"
 	"github.com/ethpandaops/disruptoor/internal/discovery"
 	"github.com/ethpandaops/disruptoor/internal/netns"
 	"github.com/ethpandaops/disruptoor/internal/runner"
@@ -38,6 +39,7 @@ type runFlags struct {
 	labelPrefix     string
 	logLevel        string
 	logFormat       string
+	configPath      string
 }
 
 func newRoot() *cobra.Command {
@@ -63,6 +65,8 @@ func newRoot() *cobra.Command {
 		"Log level: debug, info, warn, error")
 	root.PersistentFlags().StringVar(&f.logFormat, "log-format", "json",
 		"Log format: json or text")
+	root.PersistentFlags().StringVar(&f.configPath, "config", "",
+		"Path to initial state file (.yaml/.yml/.json); applied before HTTP serving begins")
 
 	root.SetContext(rootContext())
 	return root
@@ -136,6 +140,21 @@ func run(ctx context.Context, f runFlags) error {
 	if err != nil {
 		return fmt.Errorf("api: %w", err)
 	}
+
+	if f.configPath != "" {
+		initial, err := config.Load(f.configPath)
+		if err != nil {
+			return fmt.Errorf("load --config %s: %w", f.configPath, err)
+		}
+		if err := apiSvc.Apply(ctx, initial); err != nil {
+			return fmt.Errorf("apply initial state from %s: %w", f.configPath, err)
+		}
+		logger.InfoContext(ctx, "applied initial state from --config",
+			slog.String("path", f.configPath),
+			slog.Int("partitions", len(initial.Partitions)),
+			slog.Int("shaping", len(initial.Shaping)))
+	}
+
 	if err := apiSvc.Start(ctx); err != nil {
 		return fmt.Errorf("api start: %w", err)
 	}
