@@ -31,6 +31,36 @@ curl http://localhost:7700/v1/healthz
 curl http://localhost:7700/v1/state
 ```
 
+Trigger a partition that splits the two test containers (`alpha` and `bravo`) on their p2p ports:
+
+```bash
+curl -X PUT http://localhost:7700/v1/state \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "partitions": [
+      {
+        "name": "alpha-vs-bravo",
+        "groups": [
+          {"id": "alpha"},
+          {"id": "bravo"}
+        ]
+      }
+    ]
+  }'
+```
+
+Verify it bit (alpha can no longer reach bravo's discovery port):
+
+```bash
+docker exec disruptoor-test-alpha nc -vz 172.30.0.11 30303
+```
+
+Heal everything:
+
+```bash
+curl -X POST http://localhost:7700/v1/state/clear
+```
+
 ### Use the published image
 
 ```bash
@@ -78,13 +108,6 @@ Or as a Docker image (multi-arch via buildx):
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 -t disruptoor:dev .
 ```
-
-## Goals & non-goals
-
-- **Goals:** Docker-first, declarative, programmable at runtime, reproducible, Ethereum-agnostic core, safe by default (never disrupts RPC/engine/metrics unless explicitly opted-in).
-- **Non-goals:** application-layer manipulation (gossip mutation), Byzantine client behaviour, Kubernetes support, clock skew / disk pressure / OOM injection.
-
-See `disruptoor.md` for the full list.
 
 ## Contributing
 
