@@ -1,0 +1,85 @@
+name: Build Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version Number ('0.x.y')"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build_binaries:
+    name: "Build disruptoor"
+    uses: ./.github/workflows/_shared-build.yaml
+    with:
+      ref: ${{ github.sha }}
+      release: "v${{ inputs.version }}"
+      docker: true
+      docker_repository: "ethpandaops/disruptoor"
+      docker_tag_prefix: "v${{ inputs.version }}"
+      additional_tags: "['v${{ inputs.version }}','latest']"
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  create_release:
+    name: Create Release
+    needs: [build_binaries]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 100
+        ref: ${{ github.sha }}
+
+    - name: "Generate release changelog"
+      id: changelog
+      run: |
+        git fetch --tags
+        prev_tag=$(git tag --sort=-version:refname | grep -e "^v[0-9.]*$" | head -n 1)
+        echo "previous release: $prev_tag"
+        if [ "$prev_tag" ]; then
+          changelog=$(git log --oneline --no-decorate $prev_tag..HEAD)
+        else
+          changelog=$(git log --oneline --no-decorate)
+        fi
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo " - ${changelog//$'\n'/$'\n' - }" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: "Download build artifacts"
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+
+    - name: "Generate release package: disruptoor_${{ inputs.version }}_linux_amd64.tar.gz"
+      run: |
+        cd disruptoor_linux_amd64
+        tar -czf ../disruptoor_${{ inputs.version }}_linux_amd64.tar.gz .
+    - name: "Generate release package: disruptoor_${{ inputs.version }}_linux_arm64.tar.gz"
+      run: |
+        cd disruptoor_linux_arm64
+        tar -czf ../disruptoor_${{ inputs.version }}_linux_arm64.tar.gz .
+
+    - name: Create draft release
+      uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+      with:
+        draft: true
+        prerelease: false
+        name: "v${{ inputs.version }}"
+        tag_name: "v${{ inputs.version }}"
+        body: |
+          ### Changes
+          ${{ steps.changelog.outputs.changelog }}
+
+          ### Release Artifacts
+          | Release File  | Description |
+          | ------------- | ------------- |
+          | [disruptoor_${{ inputs.version }}_linux_amd64.tar.gz](https://github.com/ethpandaops/disruptoor/releases/download/v${{ inputs.version }}/disruptoor_${{ inputs.version }}_linux_amd64.tar.gz) | disruptoor binary for linux/amd64 |
+          | [disruptoor_${{ inputs.version }}_linux_arm64.tar.gz](https://github.com/ethpandaops/disruptoor/releases/download/v${{ inputs.version }}/disruptoor_${{ inputs.version }}_linux_arm64.tar.gz) | disruptoor binary for linux/arm64 |
+
+          The release is also available as a Docker image: `ethpandaops/disruptoor:v${{ inputs.version }}`.
+        files: |
+          disruptoor_${{ inputs.version }}_linux_amd64.tar.gz
+          disruptoor_${{ inputs.version }}_linux_arm64.tar.gz
