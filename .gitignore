@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/out/
+/dist/
+/disruptoor
+
+# Test & coverage
+*.test
+*.out
+coverage.txt
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local env / secrets
+.env
+.env.*
+!.env.example

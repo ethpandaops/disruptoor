@@ -1,0 +1,61 @@
+services:
+  alpha:
+    image: nicolaka/netshoot
+    container_name: disruptoor-test-alpha
+    command: ["sleep", "infinity"]
+    networks:
+      testnet:
+        ipv4_address: 172.30.0.10
+    labels:
+      com.kurtosistech.enclave-id: disruptoor-test
+      com.kurtosistech.container-type: user-service
+      com.kurtosistech.id: alpha
+      com.kurtosistech.private-ip: 172.30.0.10
+      com.kurtosistech.ports: "tcp-discovery:30303/TCP,udp-discovery:30303/UDP,rpc:8545/TCP,metrics:9001/TCP"
+      com.kurtosistech.custom.ethereum-package.client: geth
+      com.kurtosistech.custom.ethereum-package.client-type: execution
+      com.kurtosistech.custom.ethereum-package.node-index: "1"
+
+  bravo:
+    image: nicolaka/netshoot
+    container_name: disruptoor-test-bravo
+    command: ["sleep", "infinity"]
+    networks:
+      testnet:
+        ipv4_address: 172.30.0.11
+    labels:
+      com.kurtosistech.enclave-id: disruptoor-test
+      com.kurtosistech.container-type: user-service
+      com.kurtosistech.id: bravo
+      com.kurtosistech.private-ip: 172.30.0.11
+      com.kurtosistech.ports: "tcp-discovery:30303/TCP,udp-discovery:30303/UDP,rpc:8545/TCP,metrics:9001/TCP"
+      com.kurtosistech.custom.ethereum-package.client: geth
+      com.kurtosistech.custom.ethereum-package.client-type: execution
+      com.kurtosistech.custom.ethereum-package.node-index: "2"
+
+  disruptoor:
+    build: .
+    container_name: disruptoor
+    privileged: true
+    pid: host
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - --addr=:7700
+      - --enclave-id=disruptoor-test
+      - --log-level=debug
+      - --log-format=text
+    depends_on:
+      - alpha
+      - bravo
+
+networks:
+  testnet:
+    name: disruptoor-testnet
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+    labels:
+      com.kurtosistech.container-type: enclave
