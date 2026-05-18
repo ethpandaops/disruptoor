@@ -1,5 +1,5 @@
 # Final-stage-only Dockerfile used by CI: assumes the binary has already
-# been built (per arch) on a host runner and lives at ./bin/disruptoor.
+# been built (per arch) on a host runner and is provided as the build context.
 FROM alpine:3.20
 RUN apk add --no-cache \
     iptables \
@@ -11,7 +11,7 @@ RUN apk add --no-cache \
     util-linux \
     iputils \
     ca-certificates
-COPY bin/disruptoor /usr/local/bin/disruptoor
+COPY disruptoor /usr/local/bin/disruptoor
 EXPOSE 7700
 ENTRYPOINT ["/usr/local/bin/disruptoor"]
 CMD ["--addr=:7700"]

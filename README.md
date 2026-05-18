@@ -74,15 +74,18 @@ The wire format is identical to `PUT /v1/state` — see [`examples/disruption.ya
 ### Use the published image
 
 ```bash
-docker pull ethpandaops/disruptoor:master-latest
+docker pull ethpandaops/disruptoor:latest
 ```
+
+`latest` tracks the most recent published release. For reproducible deployments,
+pin an explicit release tag such as `ethpandaops/disruptoor:vX.Y.Z`.
 
 The container needs `--privileged` (or `cap_add: NET_ADMIN`) and access to the Docker socket and the host PID namespace to enter container netns'es:
 
 ```yaml
 services:
   disruptoor:
-    image: ethpandaops/disruptoor:master-latest
+    image: ethpandaops/disruptoor:vX.Y.Z
     privileged: true
     pid: host
     network_mode: host
@@ -116,7 +119,7 @@ make test-race       # go test -race ./...
 Or as a Docker image (multi-arch via buildx):
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t disruptoor:dev .
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg RELEASE=dev -t disruptoor:dev .
 ```
 
 ## Contributing

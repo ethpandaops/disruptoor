@@ -14,7 +14,7 @@ on:
       docker:
         description: 'Build docker images'
         default: false
-        required: true
+        required: false
         type: boolean
       docker_repository:
         description: 'Docker Hub Repository'
@@ -38,6 +38,9 @@ on:
       DOCKERHUB_TOKEN:
         description: 'Docker Hub Token'
         required: false
+
+permissions:
+  contents: read
 
 jobs:
   build_linux_amd64_binary:
@@ -123,7 +126,7 @@ jobs:
 
     - name: Build amd64 docker image
       run: |
-        docker build . --file Dockerfile-stub \
+        docker build ./bin --file Dockerfile-stub \
           --tag ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-amd64 \
           --tag ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-amd64 \
           --platform=linux/amd64
@@ -166,7 +169,7 @@ jobs:
 
     - name: Build arm64 docker image
       run: |
-        docker build . --file Dockerfile-stub \
+        docker build ./bin --file Dockerfile-stub \
           --tag ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-arm64 \
           --tag ${{ inputs.docker_repository }}:${{ inputs.docker_tag_prefix }}-${{ steps.vars.outputs.sha_short }}-arm64 \
           --platform=linux/arm64
