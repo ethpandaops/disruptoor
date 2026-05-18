@@ -81,7 +81,10 @@ func (s *service) Apply(ctx context.Context, plan []backend.ResolvedShaping) err
 	defer s.mu.Unlock()
 
 	for _, c := range s.lastTargets {
-		s.delRootBestEffort(ctx, c)
+		if s.delRootBestEffort(ctx, c) {
+			s.logger.InfoContext(ctx, "removed shaping",
+				slog.String("container", c.Name))
+		}
 	}
 	s.lastTargets = nil
 
@@ -130,7 +133,10 @@ func (s *service) Clear(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range s.lastTargets {
-		s.delRootBestEffort(ctx, c)
+		if s.delRootBestEffort(ctx, c) {
+			s.logger.InfoContext(ctx, "removed shaping",
+				slog.String("container", c.Name))
+		}
 	}
 	s.lastTargets = nil
 	return nil
@@ -203,22 +209,27 @@ func netemSpec(sh backend.ResolvedShaping) []string {
 }
 
 // delRootBestEffort removes whatever root qdisc is in place, ignoring the
-// "no such file" error tc returns when there's nothing to delete.
-func (s *service) delRootBestEffort(ctx context.Context, c discovery.Container) {
+// "no such file" error tc returns when there's nothing to delete. Returns
+// true when the kernel is now in a clean state (qdisc deleted or never
+// existed), false when the delete itself errored and a partial qdisc tree
+// may still be in place — callers use the return to decide whether to
+// emit a "removed shaping" INFO line on the teardown path.
+func (s *service) delRootBestEffort(ctx context.Context, c discovery.Container) bool {
 	if c.PID == 0 {
-		return
+		return true
 	}
 	_, _, err := s.enterer.Run(ctx, c.PID, "tc", "qdisc", "del", "dev", s.iface, "root")
 	if err == nil {
-		return
+		return true
 	}
 	// tc exits 2 when there's no qdisc to delete on Linux.
 	exit := runner.ExitCode(err)
 	if exit == 2 {
-		return
+		return true
 	}
 	s.logger.DebugContext(ctx, "tc qdisc del failed",
 		slog.String("container", c.Name),
 		slog.Int("exit_code", exit),
 		slog.String("error", err.Error()))
+	return false
 }
