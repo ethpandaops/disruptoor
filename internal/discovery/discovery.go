@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"strings"
 
-	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
@@ -322,7 +321,7 @@ func readSelfContainerID() (string, error) {
 
 // collectIPs prefers the Kurtosis-set private-ip label (one round trip
 // saved, deterministic) and falls back to NetworkSettings if absent.
-func collectIPs(labels map[string]string, settings *dockertypes.NetworkSettings) []net.IP {
+func collectIPs(labels map[string]string, settings *container.NetworkSettings) []net.IP {
 	out := make([]net.IP, 0, 2)
 	if v := labels[privateIPLabel]; v != "" {
 		if ip := net.ParseIP(v); ip != nil {
