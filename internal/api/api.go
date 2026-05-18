@@ -1,7 +1,15 @@
 // Package api exposes the disruptoor HTTP API and reconciles desired
 // state against the live system. Every PUT /v1/state replaces the entire
 // applied state: backends are cleared, the new state is resolved against
-// Docker, and applied in order (iptables → conntrack flush → tc).
+// Docker, and applied in order (conntrack flush → iptables → tc).
+//
+// The flush-before-iptables ordering is intentional. `ss -K` inside
+// conntrack.Flush kills established sockets, which makes the kernel emit
+// FIN/RST to the peer. If we installed OUTPUT DROP rules first, those
+// teardown packets would be dropped by our own chain and the peer would
+// keep us in its connected-peer list until app-layer keepalives expire
+// (minutes on most CL/EL clients). Flushing first lets the teardown
+// escape; OUTPUT DROP then closes the door against new connections.
 //
 // Failure mode: on any apply error, all backends are cleared so the
 // system ends up in a known-empty state; the user is expected to re-PUT.
@@ -192,13 +200,16 @@ func (s *service) applyLocked(ctx context.Context, desired state.State) error {
 		return fmt.Errorf("resolve shaping: %w", err)
 	}
 
-	if err := s.cfg.Iptables.Apply(ctx, resolvedPartitions); err != nil {
-		_ = s.clearLocked(ctx)
-		return fmt.Errorf("iptables apply: %w", err)
-	}
+	// Flush BEFORE installing drop rules so `ss -K`'s FIN/RST can escape
+	// to the peer; see package comment. Errors are non-fatal — partitions
+	// still take effect, they just bite less cleanly.
 	if err := s.cfg.Conntrack.Flush(ctx, resolvedPartitions); err != nil {
 		s.logger.WarnContext(ctx, "conntrack flush errored; partitions may take time to bite",
 			slog.String("error", err.Error()))
+	}
+	if err := s.cfg.Iptables.Apply(ctx, resolvedPartitions); err != nil {
+		_ = s.clearLocked(ctx)
+		return fmt.Errorf("iptables apply: %w", err)
 	}
 	if err := s.cfg.TC.Apply(ctx, resolvedShaping); err != nil {
 		_ = s.clearLocked(ctx)
