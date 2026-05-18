@@ -1,0 +1,70 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
+      <h2 class="mb-0">Containers</h2>
+      <div class="text-muted small">
+        Enclave:
+        <span class="font-monospace">{{ if .EnclaveID }}{{ .EnclaveID }}{{ else }}unscoped{{ end }}</span>
+      </div>
+    </div>
+
+    {{ if .Error }}
+      <div class="alert alert-danger">
+        <strong>Discovery error:</strong> {{ .Error }}
+      </div>
+    {{ end }}
+
+    <div class="card">
+      <div class="card-body px-0 py-2">
+        {{ if .Containers }}
+          <div class="table-responsive">
+            <table class="table mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>ID</th>
+                  <th>PID</th>
+                  <th>IPs</th>
+                  <th>Ports</th>
+                  <th>Labels</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{ range $row := .Containers }}
+                  <tr>
+                    <td class="font-monospace">{{ $row.Name }}</td>
+                    <td class="font-monospace small">
+                      {{ $row.ID }}
+                      <i class="fa fa-copy copy-icon ms-1" data-clipboard-text="{{ $row.ID }}" title="Copy"></i>
+                    </td>
+                    <td class="font-monospace">{{ orZero $row.PID }}</td>
+                    <td>
+                      {{ range $row.IPs }}<div class="font-monospace small">{{ . }}</div>{{ end }}
+                    </td>
+                    <td>
+                      {{ range $row.PortLabels }}<div class="font-monospace small">{{ . }}</div>{{ end }}
+                    </td>
+                    <td>
+                      <details>
+                        <summary class="small text-muted">{{ len $row.Labels }} label(s)</summary>
+                        <div class="mt-1">
+                          {{ range $k := sortedKeysFromAny $row.Labels }}
+                            <div class="font-monospace small">
+                              {{ $k }} = <span class="text-muted">{{ index $row.Labels $k }}</span>
+                            </div>
+                          {{ end }}
+                        </div>
+                      </details>
+                    </td>
+                  </tr>
+                {{ end }}
+              </tbody>
+            </table>
+          </div>
+        {{ else }}
+          <p class="text-muted px-3 py-2 mb-0">No containers visible in this enclave.</p>
+        {{ end }}
+      </div>
+    </div>
+  </div>
+{{ end }}

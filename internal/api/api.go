@@ -41,6 +41,36 @@ type Config struct {
 	Iptables  iptables.Service
 	TC        tc.Service
 	Conntrack conntrack.Service
+	// ExtraRoutes, if non-nil, is invoked after the v1 API routes are
+	// registered on the internal mux. Lets a caller (e.g. cmd/disruptoor) mount
+	// the webui on the same listener so the browser can call /v1/* same-origin.
+	ExtraRoutes func(mux *http.ServeMux)
+	// OnEvent, if non-nil, is invoked synchronously after every state-mutation
+	// attempt (apply success/failure or clear). Implementations must not block.
+	OnEvent func(Event)
+}
+
+// EventKind classifies state-mutation events emitted via Config.OnEvent.
+type EventKind string
+
+const (
+	// EventApplied means the desired state was successfully applied.
+	EventApplied EventKind = "applied"
+	// EventCleared means the kernel state was cleared.
+	EventCleared EventKind = "cleared"
+	// EventApplyFailed means an apply was attempted but failed; the kernel
+	// has been rolled back to empty.
+	EventApplyFailed EventKind = "apply_failed"
+)
+
+// Event describes one observed state-mutation.
+type Event struct {
+	Kind       EventKind   `json:"kind"`
+	At         time.Time   `json:"at"`
+	Source     string      `json:"source,omitempty"` // "http", "config", "internal"
+	RemoteAddr string      `json:"remote_addr,omitempty"`
+	State      state.State `json:"state,omitempty"`
+	Error      string      `json:"error,omitempty"`
 }
 
 // Service runs the HTTP listener and owns the reconciliation lock.
@@ -51,6 +81,8 @@ type Service interface {
 	// pipeline as PUT /v1/state. Used at startup for --config; on failure
 	// the kernel is rolled back to empty.
 	Apply(ctx context.Context, desired state.State) error
+	// GetState returns the currently applied state. Safe for concurrent use.
+	GetState() state.State
 }
 
 // NewService validates cfg and returns a Service. Start does the actual
@@ -86,6 +118,9 @@ func (s *service) Start(ctx context.Context) error {
 	mux.HandleFunc("GET /v1/state", s.handleGetState)
 	mux.HandleFunc("PUT /v1/state", s.handlePutState)
 	mux.HandleFunc("POST /v1/state/clear", s.handleClear)
+	if s.cfg.ExtraRoutes != nil {
+		s.cfg.ExtraRoutes(mux)
+	}
 
 	s.srv = &http.Server{
 		Addr:              s.cfg.Addr,
@@ -127,10 +162,20 @@ func (s *service) Apply(ctx context.Context, desired state.State) error {
 	defer s.mu.Unlock()
 	if err := s.applyLocked(ctx, desired); err != nil {
 		s.applied = state.State{}
+		s.emit(Event{Kind: EventApplyFailed, At: time.Now(), Source: "config", Error: err.Error()})
 		return err
 	}
 	s.applied = desired
+	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "config", State: desired})
 	return nil
+}
+
+// GetState returns a copy of the currently applied state. Safe for concurrent
+// callers; the returned State shares no mutable slices with the service.
+func (s *service) GetState() state.State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneState(s.applied)
 }
 
 func (s *service) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -165,10 +210,12 @@ func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 		s.applied = state.State{}
 		s.logger.ErrorContext(r.Context(), "apply failed; rolled back to empty",
 			slog.String("error", err.Error()))
+		s.emit(Event{Kind: EventApplyFailed, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, Error: err.Error()})
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.applied = desired
+	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, State: desired})
 	writeJSON(w, http.StatusOK, desired)
 }
 
@@ -180,11 +227,37 @@ func (s *service) handleClear(w http.ResponseWriter, r *http.Request) {
 		// hold a partially-cleared mix that doesn't match s.applied, so
 		// stop advertising the prior state.
 		s.applied = state.State{}
+		s.emit(Event{Kind: EventApplyFailed, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, Error: err.Error()})
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	s.applied = state.State{}
+	s.emit(Event{Kind: EventCleared, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+}
+
+func (s *service) emit(ev Event) {
+	if s.cfg.OnEvent == nil {
+		return
+	}
+	s.cfg.OnEvent(ev)
+}
+
+// cloneState returns a shallow-deep copy: top-level slices are fresh so callers
+// can safely range/sort the result without seeing future mutations under our
+// lock. Selector maps inside groups are not deep-copied because no caller
+// mutates them in practice.
+func cloneState(s state.State) state.State {
+	out := state.State{}
+	if len(s.Partitions) > 0 {
+		out.Partitions = make([]state.Partition, len(s.Partitions))
+		copy(out.Partitions, s.Partitions)
+	}
+	if len(s.Shaping) > 0 {
+		out.Shaping = make([]state.Shaping, len(s.Shaping))
+		copy(out.Shaping, s.Shaping)
+	}
+	return out
 }
 
 // applyLocked runs the full apply pipeline. Caller must hold s.mu.

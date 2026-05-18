@@ -1,0 +1,122 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
+      <h2 class="mb-0">Partitions</h2>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addPartitionModal">
+        <i class="fas fa-plus me-1"></i> Add partition
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-body px-0 py-2">
+        {{ if .Partitions }}
+          <div class="table-responsive">
+            <table class="table mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Groups</th>
+                  <th>Scope</th>
+                  <th>Symmetric</th>
+                  <th style="width: 100px">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{ range .Partitions }}
+                  <tr>
+                    <td class="font-monospace">{{ .Name }}</td>
+                    <td>
+                      {{ range $i, $g := .Groups }}
+                        <div class="partition-group">
+                          <div class="group-title">Group {{ add $i 1 }}</div>
+                          {{ if $g.All }}
+                            <span class="badge text-bg-warning">all</span>
+                          {{ else }}
+                            {{ range $k := sortedKeys $g.Match }}
+                              <span class="label-pill badge text-bg-secondary me-1">
+                                {{ $k }}={{ joinStrings "," (index $g.Match $k) }}
+                              </span>
+                            {{ end }}
+                          {{ end }}
+                        </div>
+                      {{ end }}
+                    </td>
+                    <td>
+                      {{ range .Scope }}<span class="scope-pill">{{ . }}</span>{{ end }}
+                    </td>
+                    <td>
+                      {{ if .Symmetric }}
+                        <span class="badge text-bg-success">yes</span>
+                      {{ else }}
+                        <span class="badge text-bg-warning">one-way</span>
+                      {{ end }}
+                    </td>
+                    <td>
+                      <button class="btn btn-sm btn-outline-danger"
+                              data-action="remove-entry"
+                              data-kind="partition"
+                              data-name="{{ .Name }}"
+                              title="Remove">
+                        <i class="fas fa-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                {{ end }}
+              </tbody>
+            </table>
+          </div>
+        {{ else }}
+          <p class="text-muted px-3 py-2 mb-0">No partitions configured. Use the button above to add one, or PUT a state via the v1 API.</p>
+        {{ end }}
+      </div>
+    </div>
+
+    <!-- Add partition modal -->
+    <div class="modal fade" id="addPartitionModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <form id="partition-add-form">
+            <div class="modal-header">
+              <h5 class="modal-title">Add partition</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Name</label>
+                <input type="text" name="name" class="form-control" placeholder="alpha-vs-bravo" required>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">Groups (JSON array of selectors)</label>
+                <textarea name="groups" class="form-control font-monospace" rows="6" placeholder='[{"id": "alpha"}, {"id": "bravo"}]'></textarea>
+                <div class="form-text">
+                  Each group is a selector. Use <code>"all"</code> to match every container, or an object like
+                  <code>{"id": "alpha"}</code> for a label match. Label keys without a dot get the
+                  <code>com.kurtosistech.custom.ethereum-package.</code> prefix.
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Scope (comma-separated, optional)</label>
+                  <input type="text" name="scope" class="form-control" placeholder="cl_p2p,el_p2p">
+                  <div class="form-text">Empty → defaults to <code>cl_p2p,el_p2p</code>.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Symmetric</label>
+                  <select name="symmetric" class="form-select">
+                    <option value="default">default (true)</option>
+                    <option value="true">true</option>
+                    <option value="false">false (one-way)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Add partition</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{{ end }}

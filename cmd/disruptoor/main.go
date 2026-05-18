@@ -14,6 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"net/http"
+
 	"github.com/ethpandaops/disruptoor/internal/api"
 	"github.com/ethpandaops/disruptoor/internal/backend/conntrack"
 	"github.com/ethpandaops/disruptoor/internal/backend/iptables"
@@ -23,6 +25,8 @@ import (
 	"github.com/ethpandaops/disruptoor/internal/netns"
 	"github.com/ethpandaops/disruptoor/internal/runner"
 	"github.com/ethpandaops/disruptoor/internal/state"
+	"github.com/ethpandaops/disruptoor/internal/webui"
+	"github.com/ethpandaops/disruptoor/internal/webui/eventlog"
 )
 
 var version = "dev"
@@ -42,6 +46,9 @@ type runFlags struct {
 	logLevel        string
 	logFormat       string
 	configPath      string
+	disableWebUI    bool
+	webUIEventSize  int
+	webUIDebug      bool
 }
 
 func newRoot() *cobra.Command {
@@ -70,6 +77,12 @@ func newRoot() *cobra.Command {
 		"Log format: json or text")
 	root.PersistentFlags().StringVar(&f.configPath, "config", "",
 		"Path to initial state file (.yaml/.yml/.json); applied before HTTP serving begins")
+	root.PersistentFlags().BoolVar(&f.disableWebUI, "disable-webui", false,
+		"Disable the embedded web UI (it shares the API listener when enabled)")
+	root.PersistentFlags().IntVar(&f.webUIEventSize, "webui-event-buffer", 200,
+		"Size of the in-memory event ring shown by the web UI")
+	root.PersistentFlags().BoolVar(&f.webUIDebug, "webui-debug", false,
+		"Disable template caching in the web UI (reload from embed.FS each request)")
 
 	root.SetContext(rootContext())
 	return root
@@ -133,15 +146,57 @@ func run(ctx context.Context, f runFlags) error {
 
 	ctSvc := conntrack.NewService(logger, enterer)
 
+	// Break the cycle between api and webui (each wants a reference to the
+	// other) with a forward-declared variable: the api gets a closure that
+	// reads webUISvc, which is assigned after api.NewService returns. The
+	// closure is only invoked from Start, well after both are wired.
+	var (
+		webUISvc     webui.Service
+		events       *eventlog.Ring
+		onEventFn    func(api.Event)
+		extraRoutes  func(*http.ServeMux)
+		webUIEnabled = !f.disableWebUI
+	)
+	if webUIEnabled {
+		events = eventlog.New(eventlog.Config{Size: f.webUIEventSize})
+		onEventFn = events.Append
+		extraRoutes = func(mux *http.ServeMux) {
+			if webUISvc != nil {
+				webUISvc.RegisterRoutes(mux)
+			}
+		}
+	}
+
 	apiSvc, err := api.NewService(logger, api.Config{
-		Addr:      f.addr,
-		Discovery: disc,
-		Iptables:  iptSvc,
-		TC:        tcSvc,
-		Conntrack: ctSvc,
+		Addr:        f.addr,
+		Discovery:   disc,
+		Iptables:    iptSvc,
+		TC:          tcSvc,
+		Conntrack:   ctSvc,
+		OnEvent:     onEventFn,
+		ExtraRoutes: extraRoutes,
 	})
 	if err != nil {
 		return fmt.Errorf("api: %w", err)
+	}
+
+	if webUIEnabled {
+		webUISvc, err = webui.NewService(logger, webui.Config{
+			SiteName:  "disruptoor",
+			Version:   version,
+			BuildTime: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+			Debug:     f.webUIDebug,
+			State:     apiSvc,
+			Discovery: disc,
+			Events:    events,
+		})
+		if err != nil {
+			return fmt.Errorf("webui: %w", err)
+		}
+		logger.InfoContext(ctx, "web UI enabled",
+			slog.String("addr", f.addr),
+			slog.Bool("debug", f.webUIDebug),
+			slog.Int("event_buffer", f.webUIEventSize))
 	}
 
 	if f.configPath != "" {
