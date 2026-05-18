@@ -81,7 +81,7 @@ func (s *service) Start(ctx context.Context) error {
 
 	s.srv = &http.Server{
 		Addr:              s.cfg.Addr,
-		Handler:           mux,
+		Handler:           s.logRequests(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -258,6 +258,38 @@ func (s *service) resolveShaping(ctx context.Context, sh []state.Shaping) ([]bac
 		})
 	}
 	return out, nil
+}
+
+// statusRecorder wraps http.ResponseWriter to capture the status code that
+// downstream handlers wrote, so the request-log middleware can include it.
+// WriteHeader is the only hook needed because handlers that never call it
+// implicitly write 200.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// logRequests is HTTP middleware that emits one INFO log per processed
+// request. Symmetric with the backend install/remove INFO lines: every
+// state-mutation call site is now visible in logs without per-handler
+// boilerplate.
+func (s *service) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		s.logger.InfoContext(r.Context(), "request",
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", rec.status),
+			slog.Duration("duration", time.Since(start)),
+			slog.String("remote", r.RemoteAddr))
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

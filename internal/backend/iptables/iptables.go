@@ -128,9 +128,14 @@ func (s *service) Clear(ctx context.Context) error {
 func (s *service) clearTargetsLocked(ctx context.Context, targets []discovery.Container) error {
 	var firstErr error
 	for _, c := range targets {
-		if err := s.flushChainBestEffort(ctx, c); err != nil && firstErr == nil {
-			firstErr = err
+		if err := s.flushChainBestEffort(ctx, c); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		s.logger.InfoContext(ctx, "removed partition rules",
+			slog.String("member", c.Name))
 	}
 	return firstErr
 }
