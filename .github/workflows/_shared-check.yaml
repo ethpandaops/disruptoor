@@ -8,6 +8,9 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+
 jobs:
   check_source:
     name: Run code checks
@@ -32,7 +35,7 @@ jobs:
       run: if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then exit 1; fi
 
     - name: Install staticcheck
-      run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
     - name: Run staticcheck
       run: staticcheck ./...
 

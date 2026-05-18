@@ -25,6 +25,8 @@ import (
 	"github.com/ethpandaops/disruptoor/internal/state"
 )
 
+var version = "dev"
+
 func main() {
 	if err := newRoot().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -45,8 +47,9 @@ type runFlags struct {
 func newRoot() *cobra.Command {
 	var f runFlags
 	root := &cobra.Command{
-		Use:   "disruptoor",
-		Short: "Privileged Docker sidecar for network disruptions",
+		Use:     "disruptoor",
+		Short:   "Privileged Docker sidecar for network disruptions",
+		Version: version,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return run(cmd.Context(), f)
 		},
