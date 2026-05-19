@@ -1,4 +1,8 @@
-# disruptoor
+<p align="center">
+  <img src="./docs/assets/disruptoor-logo.png" alt="disruptoor" width="180" />
+</p>
+
+<h1 align="center">disruptoor</h1>
 
 [![Build master](https://github.com/ethpandaops/disruptoor/actions/workflows/build-master.yml/badge.svg)](https://github.com/ethpandaops/disruptoor/actions/workflows/build-master.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ethpandaops/disruptoor)](https://goreportcard.com/report/github.com/ethpandaops/disruptoor)
@@ -95,6 +99,30 @@ services:
       - --addr=:7700
       - --enclave-id=<your-enclave-uuid>
 ```
+
+## Web UI
+
+When disruptoor is running, point a browser at the same `--addr` to access an
+embedded control panel (Bootstrap, no external CDN). The UI shares the listener
+with the v1 API and lets you:
+
+- See the current applied state at a glance
+- Add or remove partitions and shaping rules without crafting JSON by hand
+- List the Kurtosis containers the discovery service can resolve
+- Browse an in-memory event log of every applied / cleared / failed apply
+- Edit and PUT the raw state as JSON
+
+| Path           | Purpose                                       |
+|----------------|-----------------------------------------------|
+| `/`            | Dashboard summary + recent events             |
+| `/partitions`  | Active partitions, plus an Add modal          |
+| `/shaping`     | Active shaping rules, plus an Add modal       |
+| `/containers`  | All containers visible in the enclave         |
+| `/events`      | Mutation log (ring buffer, clears on restart) |
+| `/state`       | Raw JSON editor — same wire format as the API |
+
+Pass `--disable-webui` to skip mounting the UI altogether, or
+`--webui-event-buffer N` to size the in-memory event ring (default 200).
 
 ## API
 

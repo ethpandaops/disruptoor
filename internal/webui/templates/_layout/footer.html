@@ -1,0 +1,13 @@
+{{ define "footer" }}
+  <footer class="container">
+    <div class="text-center row justify-content-center">
+      <div class="col-12">
+        <span>
+          Powered by
+          <a href="https://github.com/ethpandaops/disruptoor" target="_blank" rel="noopener">ethpandaops/disruptoor</a>
+          {{ if .Version }}| {{ .Version }}{{ end }}
+        </span>
+      </div>
+    </div>
+  </footer>
+{{ end }}

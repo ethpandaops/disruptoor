@@ -1,0 +1,191 @@
+{{ define "page" }}
+  <div class="container mt-2">
+    <div class="d-flex justify-content-between align-items-center mt-2 mb-2">
+      <h2 class="mb-0">Partitions</h2>
+      <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addPartitionModal">
+        <i class="fas fa-plus me-1"></i> Add partition
+      </button>
+    </div>
+
+    <div class="card">
+      <div class="card-body px-0 py-2">
+        {{ if .Partitions }}
+          <div class="table-responsive">
+            <table class="table mb-0">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Groups</th>
+                  <th>Scope</th>
+                  <th>Symmetric</th>
+                  <th style="width: 100px">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{ range .Partitions }}
+                  <tr>
+                    <td class="font-monospace">{{ .Name }}</td>
+                    <td>
+                      {{ range $i, $g := .Groups }}
+                        <div class="partition-group">
+                          <div class="group-title">Group {{ add $i 1 }}</div>
+                          {{ if $g.All }}
+                            <span class="badge text-bg-warning">all</span>
+                          {{ else }}
+                            {{ range $k := sortedKeys $g.Match }}
+                              <span class="label-pill badge text-bg-secondary me-1">
+                                {{ $k }}={{ joinStrings "," (index $g.Match $k) }}
+                              </span>
+                            {{ end }}
+                          {{ end }}
+                        </div>
+                      {{ end }}
+                    </td>
+                    <td>
+                      {{ range .Scope }}<span class="scope-pill">{{ . }}</span>{{ end }}
+                    </td>
+                    <td>
+                      {{ if .Symmetric }}
+                        <span class="badge text-bg-success">yes</span>
+                      {{ else }}
+                        <span class="badge text-bg-warning">one-way</span>
+                      {{ end }}
+                    </td>
+                    <td>
+                      <button class="btn btn-sm btn-outline-danger"
+                              data-action="remove-entry"
+                              data-kind="partition"
+                              data-name="{{ .Name }}"
+                              title="Remove">
+                        <i class="fas fa-trash"></i>
+                      </button>
+                    </td>
+                  </tr>
+                {{ end }}
+              </tbody>
+            </table>
+          </div>
+        {{ else }}
+          <p class="text-muted px-3 py-2 mb-0">No partitions configured. Use the button above to add one, or PUT a state via the v1 API.</p>
+        {{ end }}
+      </div>
+    </div>
+
+    <!-- Add partition modal -->
+    <div class="modal fade" id="addPartitionModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <form id="partition-add-form" novalidate>
+            <div class="modal-header">
+              <h5 class="modal-title">Add partition</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">Name</label>
+                <input type="text" name="name" class="form-control" placeholder="alpha-vs-bravo" required>
+              </div>
+
+              <div class="mb-2 d-flex justify-content-between align-items-center">
+                <label class="form-label mb-0">Groups <span class="text-muted small">(need at least 2)</span></label>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-action="add-partition-group">
+                  <i class="fas fa-plus me-1"></i> Add group
+                </button>
+              </div>
+              <div id="partition-groups" class="selector-group-list mb-3"></div>
+              <div id="partition-discovery-warning" class="alert alert-warning d-none small mb-3"></div>
+
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Scope</label>
+                  <div class="d-flex flex-wrap gap-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="scope" value="cl_p2p" id="scope-cl-p2p" checked>
+                      <label class="form-check-label" for="scope-cl-p2p"><code>cl_p2p</code></label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="scope" value="el_p2p" id="scope-el-p2p" checked>
+                      <label class="form-check-label" for="scope-el-p2p"><code>el_p2p</code></label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="scope" value="include_control" id="scope-include-control">
+                      <label class="form-check-label" for="scope-include-control"><code>include_control</code></label>
+                    </div>
+                  </div>
+                  <div class="form-text">Default: <code>cl_p2p, el_p2p</code>. Toggle <code>include_control</code> to also drop RPC/engine/metrics.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Symmetric</label>
+                  <select name="symmetric" class="form-select">
+                    <option value="default">default (true)</option>
+                    <option value="true">true</option>
+                    <option value="false">false (one-way)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Add partition</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Selector-builder template (cloned by JS for each group / target). -->
+  <template id="selector-builder-template">
+    <div class="selector-builder card mb-2" data-component="selector-builder">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong class="selector-builder-title">Group</strong>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-selector" title="Remove">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <select class="form-select form-select-sm" data-role="mode">
+              <option value="all">All containers</option>
+              <option value="containers" selected>Specific containers</option>
+              <option value="label">Custom label match</option>
+            </select>
+          </div>
+          <div class="col-md-8">
+            <div data-role="mode-panel-all" class="d-none">
+              <span class="text-muted small">Matches every container in the enclave.</span>
+            </div>
+            <div data-role="mode-panel-containers">
+              <div class="container-picker">
+                <div class="container-picker-toolbar">
+                  <input type="search" class="form-control form-control-sm container-picker-filter" data-role="container-filter" placeholder="Filter…" aria-label="Filter containers">
+                  <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary" data-role="picker-all">All</button>
+                    <button type="button" class="btn btn-outline-secondary" data-role="picker-none">None</button>
+                  </div>
+                </div>
+                <div class="container-picker-list" data-role="container-picker"></div>
+              </div>
+              <div class="form-text" data-role="container-help">Tick one or more containers. Names are taken from the <code>com.kurtosistech.id</code> label.</div>
+            </div>
+            <div data-role="mode-panel-label" class="d-none">
+              <div class="row g-2">
+                <div class="col-5">
+                  <input type="text" class="form-control form-control-sm font-monospace" data-role="label-key" placeholder="client" list="discovered-label-keys">
+                </div>
+                <div class="col-7">
+                  <input type="text" class="form-control form-control-sm font-monospace" data-role="label-values" placeholder="lighthouse, prysm">
+                </div>
+              </div>
+              <div class="form-text">
+                Keys without a <code>.</code> get the <code>com.kurtosistech.custom.ethereum-package.</code> prefix. Multiple values OR together.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+  <datalist id="discovered-label-keys"></datalist>
+{{ end }}
