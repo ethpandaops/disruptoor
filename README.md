@@ -126,15 +126,18 @@ Pass `--disable-webui` to skip mounting the UI altogether, or
 
 ## API
 
-Declarative, versioned, idempotent. Full request/response shapes live in `disruptoor.md`.
+Declarative, versioned, idempotent. The canonical request/response schema lives
+in `schemas/v1-state.json`; broader design notes live in `disruptoor.md`.
 
 | Method | Path                | Purpose                                               |
 |-------:|---------------------|-------------------------------------------------------|
 |  `PUT` | `/v1/state`         | Replace the entire desired disruption state.          |
 |  `GET` | `/v1/state`         | Return *applied* state (reflects reality).            |
-|  `GET` | `/v1/events`        | Append-only log of every applied change.              |
 | `POST` | `/v1/state/clear`   | Heal everything.                                      |
 |  `GET` | `/v1/healthz`       | Liveness probe.                                       |
+
+`GET /v1/state` returns an `ETag`. Send it back as `If-Match` on `PUT /v1/state`
+when you want stale writes rejected with `412 Precondition Failed`.
 
 ## Building from source
 

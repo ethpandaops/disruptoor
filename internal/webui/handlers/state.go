@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ethpandaops/disruptoor/internal/api"
 	"github.com/ethpandaops/disruptoor/internal/state"
 )
 
 // StatePage is the payload for /state.
 type StatePage struct {
 	StateJSON string // pretty-printed for the editor textarea
+	StateETag string
 }
 
 // StateEditor renders the raw state editor page at /state.
@@ -23,8 +25,12 @@ func (h *Handler) StateEditor(w http.ResponseWriter, r *http.Request) {
 		// so the editor still renders.
 		b = []byte("{}")
 	}
+	etag, err := api.StateETag(cur)
+	if err != nil {
+		etag = ""
+	}
 	data := h.engine.InitPageData(r, "state", "/state", "State")
-	data.Data = &StatePage{StateJSON: string(b)}
+	data.Data = &StatePage{StateJSON: string(b), StateETag: etag}
 	h.engine.Render(w, r, []string{"state/state.html"}, data)
 }
 
@@ -32,7 +38,8 @@ func (h *Handler) StateEditor(w http.ResponseWriter, r *http.Request) {
 // enclave. Used by the partitions/shaping forms to preview how many
 // containers a candidate selector matches before submitting.
 func (h *Handler) APIResolve(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}

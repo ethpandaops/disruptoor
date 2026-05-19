@@ -110,7 +110,6 @@ Declarative, versioned, idempotent.
 
 - `PUT /v1/state` — set the entire desired disruption state. Returns when rules are applied.
 - `GET /v1/state` — return *applied* state (reflects reality, not last request).
-- `GET /v1/events` — append-only log of every change applied, with timestamps. Used for post-mortem.
 - `POST /v1/state/clear` — heal everything.
 - `GET /v1/healthz` — liveness.
 
@@ -121,22 +120,18 @@ Declarative, versioned, idempotent.
   "partitions": [
     {
       "name": "fork-split",
-      "groups": [["participant_1", "participant_2"], ["participant_3", "participant_4"]],
-      "scope": ["cl_p2p", "el_p2p"],
-      "symmetric": true
+      "groups": [
+        { "node-index": ["1", "2"] },
+        { "node-index": ["3", "4"] }
+      ],
+      "scope": ["cl_p2p", "el_p2p"]
     }
   ],
   "shaping": [
     {
-      "name": "slow-link",
-      "between": ["participant_1", "participant_3"],
-      "direction": "both",
-      "delay": "200ms",
-      "loss": "5%"
-    },
-    {
       "name": "dial-up-node",
-      "target": "participant_2",
+      "target": { "node-index": "2" },
+      "scope": ["include_control"],
       "bandwidth": "1mbit"
     }
   ]
@@ -147,9 +142,9 @@ Declarative, versioned, idempotent.
 
 - **Whole-state replacement.** A `PUT /v1/state` describes the complete desired state. Controller diffs against current and converges. Avoids drift from missed `heal`s.
 - **Synchronous apply.** Returns 200 only after kernel rules are in place. Callers (assertoor) can immediately assert without races.
-- **Conflict policy.** Two callers overlapping → 409 unless `?force=true`. Document it; don't silently merge.
+- **Conflict policy.** `GET /v1/state` returns an `ETag`. Callers that send it back as `If-Match` on `PUT /v1/state` get `412 Precondition Failed` if another write landed first.
 - **Auth by network.** Controller binds only to the enclave network. No tokens. Opt-in `expose: true` to publish on the host.
-- **Stable participant names.** API accepts the names the user wrote in `network_params`. Internal mapping to container labels happens at the package layer (see translation note above).
+- **Stable selectors.** The standalone API accepts label selectors. Higher-level package integrations can translate participant names into these selectors.
 - **Validation.** Reject configs at PUT time: same node in two groups, unknown participants, contradictory shaping rules.
 
 ## Configuration block in ethereum-package
@@ -182,8 +177,8 @@ Anything declarable here is also expressible via the runtime API. Static config 
 ## Scenarios it can model
 
 - N-way partitions (2, 3, 4+ groups; isolate one node).
-- Asymmetric splits (`A→B` blocked, `B→A` open).
-- Per-edge or per-node shaping (delay, jitter, loss, dup, reorder, bandwidth).
+- Symmetric N-way splits; asymmetric splits are future work.
+- Per-node shaping (delay, jitter, loss, bandwidth); per-edge shaping, dup, and reorder are future work.
 - Per-layer scope (CL p2p only, EL p2p only, both).
 - Time-scheduled events relative to genesis (epoch/slot/seconds), one-shot or chained.
 - Single-node degradation, supernode-vs-leaf asymmetry.
@@ -196,7 +191,7 @@ Anything declarable here is also expressible via the runtime API. Static config 
 1. **Conntrack/connection teardown on partition.** Partitions should kill existing TCP sessions, not just drop new packets. Without this, partitions feel soft for tens of seconds and behaviour looks confusing.
 2. **Default scope = p2p only.** RPC/engine/metrics/VC↔CL stay reachable unless explicitly opted in. Otherwise assertoor loses visibility into the system it's testing.
 3. **Single source of truth for group identity.** Choose either `participant.group:` field on participants OR named selectors (`groups: [[p1, p2], …]`). Don't ship both.
-4. **Symmetric by default.** Asymmetric partitions are a power-user mode behind an explicit flag.
+4. **Symmetric by default.** v0 only supports symmetric partitions; reject asymmetric requests before touching kernel state.
 5. **Validation up front.** Reject overlapping groups, unknown names, contradictory rules at config/PUT time, with clear errors.
 6. **`GET` reflects reality.** Show *applied* state, not last-requested. Lets tests detect controller bugs.
 7. **Event log is append-only.** A failing CI run must be able to reconstruct *what the network looked like* at any moment.

@@ -1,5 +1,5 @@
 {{ define "layout" }}
-  {{ $buildTime := .BuildTime }}
+  {{ $assetVersion := .AssetVersion }}
   <!DOCTYPE html>
   <html lang="en" data-bs-theme="auto">
     <head>
@@ -23,7 +23,7 @@
       <link rel="preload" as="font" href="/webfonts/fa-solid-900.woff2" crossorigin />
       <link rel="preload" as="font" href="/webfonts/fa-regular-400.woff2" crossorigin />
       <link rel="preload" as="font" href="/webfonts/fa-brands-400.woff2" crossorigin />
-      <link id="app-style" rel="stylesheet" href="/css/layout.css?{{ $buildTime }}" />
+      <link id="app-style" rel="stylesheet" href="/css/layout.css?{{ $assetVersion }}" />
       {{ block "css" .Data }}{{ end }}
     </head>
     <body>
@@ -42,7 +42,7 @@
       <script src="/js/bootstrap.bundle.min.js"></script>
       <script src="/js/color-modes.js"></script>
       <script src="/js/clipboard.min.js"></script>
-      <script src="/js/disruptoor.js?{{ $buildTime }}"></script>
+      <script src="/js/disruptoor.js?{{ $assetVersion }}"></script>
       {{ block "js" .Data }}{{ end }}
     </body>
   </html>

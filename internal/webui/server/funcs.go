@@ -17,7 +17,6 @@ func GetTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"add":         func(i, j int) int { return i + j },
 		"sub":         func(i, j int) int { return i - j },
-		"html":        func(s string) template.HTML { return template.HTML(s) },
 		"json":        jsonPretty,
 		"jsonCompact": jsonCompact,
 		"joinStrings": func(sep string, ss []string) string { return strings.Join(ss, sep) },

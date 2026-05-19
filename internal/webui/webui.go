@@ -30,10 +30,10 @@ var templatesFS embed.FS
 // Config bundles everything the webui needs to render pages and answer its own
 // JSON helper endpoints.
 type Config struct {
-	SiteName  string
-	Version   string
-	BuildTime string
-	Debug     bool
+	SiteName     string
+	Version      string
+	AssetVersion string
+	Debug        bool
 
 	// State is the live api.Service (or any stand-in for tests). Used for
 	// reading the applied state and resolving partitions/shaping.
@@ -63,12 +63,15 @@ func NewService(logger *slog.Logger, cfg Config) (Service, error) {
 		return nil, errors.New("discovery provider required")
 	}
 	// Events is optional — if unset, the events page just shows an empty list.
+	if cfg.Events == nil {
+		logger.Warn("web UI event provider missing; events page will be empty")
+	}
 
 	engine, err := server.NewEngine(logger, server.Config{
-		SiteName:  cfg.SiteName,
-		Version:   cfg.Version,
-		BuildTime: cfg.BuildTime,
-		Debug:     cfg.Debug,
+		SiteName:     cfg.SiteName,
+		Version:      cfg.Version,
+		AssetVersion: cfg.AssetVersion,
+		Debug:        cfg.Debug,
 	}, staticFS, templatesFS)
 	if err != nil {
 		return nil, err
@@ -111,7 +114,7 @@ func (s *service) RegisterRoutes(mux *http.ServeMux) {
 	// projections enriched with discovery data).
 	mux.HandleFunc("GET /webui/api/containers", s.handlers.APIContainers)
 	mux.HandleFunc("GET /webui/api/events", s.handlers.APIEvents)
-	mux.HandleFunc("GET /webui/api/resolve", s.handlers.APIResolve)
+	mux.HandleFunc("POST /webui/api/resolve", s.handlers.APIResolve)
 
 	// Static assets. The frontend handler internally calls the engine's
 	// 404 for unknown paths, so we mount it on the catch-all GET / route.

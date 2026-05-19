@@ -67,13 +67,14 @@
         },
         "symmetric": {
           "type": "boolean",
-          "description": "Defaults to true. False blocks A→B but leaves B→A open."
+          "const": true,
+          "description": "Defaults to true. v0 only supports symmetric partitions."
         }
       }
     },
     "shaping": {
       "type": "object",
-      "required": ["name", "scope"],
+      "required": ["name", "target", "scope"],
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string", "minLength": 1 },

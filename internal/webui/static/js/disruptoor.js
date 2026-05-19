@@ -16,9 +16,13 @@
         const el = document.createElement("div");
         el.className = "alert alert-" + type + " alert-dismissible fade show";
         el.setAttribute("role", "alert");
-        el.innerHTML =
-            (typeof message === "string" ? message : String(message)) +
-            '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>';
+        el.appendChild(document.createTextNode(typeof message === "string" ? message : String(message)));
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "btn-close";
+        close.setAttribute("data-bs-dismiss", "alert");
+        close.setAttribute("aria-label", "Close");
+        el.appendChild(close);
         wrap.appendChild(el);
     }
 
@@ -34,13 +38,31 @@
         }
     }
 
-    async function applyState(state) {
+    async function fetchState() {
+        const res = await fetch("/v1/state");
+        if (!res.ok) {
+            throw new Error(await readError(res));
+        }
+        return {
+            state: await res.json(),
+            etag: res.headers.get("ETag") || "",
+        };
+    }
+
+    async function applyState(state, etag) {
+        const headers = { "Content-Type": "application/json" };
+        if (etag) {
+            headers["If-Match"] = etag;
+        }
         const res = await fetch("/v1/state", {
             method: "PUT",
-            headers: { "Content-Type": "application/json" },
+            headers: headers,
             body: JSON.stringify(state),
         });
         if (!res.ok) {
+            if (res.status === 412) {
+                throw new Error("State changed since it was loaded. Reload and try again.");
+            }
             throw new Error(await readError(res));
         }
         return await res.json();
@@ -408,12 +430,11 @@
                 part.symmetric = symmetricVal === "true";
             }
             try {
-                const res = await fetch("/v1/state");
-                if (!res.ok) throw new Error(await readError(res));
-                const cur = await res.json();
-                cur.partitions = cur.partitions || [];
-                cur.partitions.push(part);
-                await applyState(cur);
+                const cur = await fetchState();
+                const state = cur.state;
+                state.partitions = state.partitions || [];
+                state.partitions.push(part);
+                await applyState(state, cur.etag);
                 flash("success", 'Added partition "' + name + '".');
                 reloadPage();
             } catch (err) {
@@ -477,12 +498,11 @@
             if (loss) sh.loss = loss;
             if (bandwidth) sh.bandwidth = bandwidth;
             try {
-                const res = await fetch("/v1/state");
-                if (!res.ok) throw new Error(await readError(res));
-                const cur = await res.json();
-                cur.shaping = cur.shaping || [];
-                cur.shaping.push(sh);
-                await applyState(cur);
+                const cur = await fetchState();
+                const state = cur.state;
+                state.shaping = state.shaping || [];
+                state.shaping.push(sh);
+                await applyState(state, cur.etag);
                 flash("success", 'Added shaping rule "' + name + '".');
                 reloadPage();
             } catch (err) {
@@ -525,15 +545,14 @@
                     return;
                 }
                 try {
-                    const res = await fetch("/v1/state");
-                    if (!res.ok) throw new Error(await readError(res));
-                    const cur = await res.json();
+                    const cur = await fetchState();
+                    const state = cur.state;
                     if (kind === "partition") {
-                        cur.partitions = (cur.partitions || []).filter(p => p.name !== name);
+                        state.partitions = (state.partitions || []).filter(p => p.name !== name);
                     } else if (kind === "shaping") {
-                        cur.shaping = (cur.shaping || []).filter(s => s.name !== name);
+                        state.shaping = (state.shaping || []).filter(s => s.name !== name);
                     }
-                    await applyState(cur);
+                    await applyState(state, cur.etag);
                     flash("success", "Removed " + kind + ' "' + name + '".');
                     reloadPage();
                 } catch (err) {
@@ -554,7 +573,7 @@
                     return;
                 }
                 try {
-                    await applyState(parsed);
+                    await applyState(parsed, editor.getAttribute("data-etag") || "");
                     flash("success", "State applied.");
                     setTimeout(reloadPage, 600);
                 } catch (err) {

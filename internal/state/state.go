@@ -173,6 +173,9 @@ func (p Partition) validate() error {
 			return fmt.Errorf("groups[%d]: empty selector", i)
 		}
 	}
+	if p.Symmetric != nil && !*p.Symmetric {
+		return errors.New("asymmetric partitions are not supported in v0")
+	}
 	for _, sc := range p.Scope {
 		if sc != ScopeCLP2P && sc != ScopeELP2P && sc != ScopeControl {
 			return fmt.Errorf("unknown scope %q", sc)
