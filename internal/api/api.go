@@ -1,9 +1,11 @@
 // Package api exposes the disruptoor HTTP API and reconciles desired
 // state against the live system. Every PUT /v1/state replaces the entire
-// applied state: backends are cleared, the new state is resolved against
-// Docker, and applied in order (conntrack flush → iptables → tc).
+// applied state: the new state is resolved against Docker, stale backend
+// rules are cleared, then the new state is applied in order (conntrack
+// flush → iptables → tc).
 //
-// The flush-before-iptables ordering is intentional. `ss -K` inside
+// The clear-before-flush and flush-before-iptables ordering is intentional.
+// Old drop rules must be removed before `ss -K` runs, and `ss -K` inside
 // conntrack.Flush kills established sockets, which makes the kernel emit
 // FIN/RST to the peer. If we installed OUTPUT DROP rules first, those
 // teardown packets would be dropped by our own chain and the peer would
@@ -17,12 +19,16 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -165,8 +171,8 @@ func (s *service) Apply(ctx context.Context, desired state.State) error {
 		s.emit(Event{Kind: EventApplyFailed, At: time.Now(), Source: "config", Error: err.Error()})
 		return err
 	}
-	s.applied = desired
-	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "config", State: desired})
+	s.applied = cloneState(desired)
+	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "config", State: cloneState(desired)})
 	return nil
 }
 
@@ -183,15 +189,19 @@ func (s *service) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *service) handleGetState(w http.ResponseWriter, _ *http.Request) {
-	s.mu.Lock()
-	current := s.applied
-	s.mu.Unlock()
+	current := s.GetState()
+	etag, err := StateETag(current)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	w.Header().Set("ETag", etag)
 	writeJSON(w, http.StatusOK, current)
 }
 
 func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 	var desired state.State
-	if err := json.NewDecoder(r.Body).Decode(&desired); err != nil {
+	if err := decodeState(r.Body, &desired); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("decode body: %w", err))
 		return
 	}
@@ -203,6 +213,24 @@ func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	currentETag, err := StateETag(s.applied)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ifMatchAllows(r.Header.Get("If-Match"), currentETag) {
+		w.Header().Set("ETag", currentETag)
+		writeError(w, http.StatusPreconditionFailed, errors.New("state changed since it was read; reload and retry"))
+		return
+	}
+
+	nextApplied := cloneState(desired)
+	newETag, err := StateETag(nextApplied)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	if err := s.applyLocked(r.Context(), desired); err != nil {
 		// applyLocked invokes clearLocked on every failure path so the
 		// kernel ends up in a known-empty state; reflect that in s.applied
@@ -211,12 +239,13 @@ func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 		s.logger.ErrorContext(r.Context(), "apply failed; rolled back to empty",
 			slog.String("error", err.Error()))
 		s.emit(Event{Kind: EventApplyFailed, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, Error: err.Error()})
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusInternalServerError, errors.New("apply failed; rolled back to empty state"))
 		return
 	}
-	s.applied = desired
-	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, State: desired})
-	writeJSON(w, http.StatusOK, desired)
+	s.applied = nextApplied
+	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, State: cloneState(desired)})
+	w.Header().Set("ETag", newETag)
+	writeJSON(w, http.StatusOK, s.applied)
 }
 
 func (s *service) handleClear(w http.ResponseWriter, r *http.Request) {
@@ -243,21 +272,123 @@ func (s *service) emit(ev Event) {
 	s.cfg.OnEvent(ev)
 }
 
-// cloneState returns a shallow-deep copy: top-level slices are fresh so callers
-// can safely range/sort the result without seeing future mutations under our
-// lock. Selector maps inside groups are not deep-copied because no caller
-// mutates them in practice.
+// cloneState returns a deep copy of State's mutable fields.
 func cloneState(s state.State) state.State {
 	out := state.State{}
 	if len(s.Partitions) > 0 {
 		out.Partitions = make([]state.Partition, len(s.Partitions))
-		copy(out.Partitions, s.Partitions)
+		for i, p := range s.Partitions {
+			out.Partitions[i] = state.Partition{
+				Name:      p.Name,
+				Groups:    cloneSelectors(p.Groups),
+				Scope:     cloneStrings(p.Scope),
+				Symmetric: cloneBoolPtr(p.Symmetric),
+			}
+		}
 	}
 	if len(s.Shaping) > 0 {
 		out.Shaping = make([]state.Shaping, len(s.Shaping))
-		copy(out.Shaping, s.Shaping)
+		for i, sh := range s.Shaping {
+			out.Shaping[i] = state.Shaping{
+				Name:      sh.Name,
+				Target:    cloneSelectorPtr(sh.Target),
+				Between:   cloneSelectors(sh.Between),
+				Scope:     cloneStrings(sh.Scope),
+				Direction: sh.Direction,
+				Delay:     sh.Delay,
+				Jitter:    sh.Jitter,
+				Loss:      sh.Loss,
+				Bandwidth: sh.Bandwidth,
+			}
+		}
 	}
 	return out
+}
+
+func cloneSelectors(in []state.Selector) []state.Selector {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]state.Selector, len(in))
+	for i, sel := range in {
+		out[i] = cloneSelector(sel)
+	}
+	return out
+}
+
+func cloneSelectorPtr(in *state.Selector) *state.Selector {
+	if in == nil {
+		return nil
+	}
+	out := cloneSelector(*in)
+	return &out
+}
+
+func cloneSelector(in state.Selector) state.Selector {
+	out := state.Selector{All: in.All}
+	if len(in.Match) > 0 {
+		out.Match = make(map[string][]string, len(in.Match))
+		for k, values := range in.Match {
+			out.Match[k] = cloneStrings(values)
+		}
+	}
+	return out
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneBoolPtr(in *bool) *bool {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+// StateETag returns a strong ETag for the canonical JSON form of s.
+func StateETag(s state.State) (string, error) {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return "", fmt.Errorf("marshal state etag: %w", err)
+	}
+	sum := sha256.Sum256(b)
+	return `"` + hex.EncodeToString(sum[:]) + `"`, nil
+}
+
+func ifMatchAllows(header, current string) bool {
+	if header == "" {
+		return true
+	}
+	for _, token := range strings.Split(header, ",") {
+		token = strings.TrimSpace(token)
+		if token == "*" || token == current {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeState(r io.Reader, out *state.State) error {
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	var extra struct{}
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values in request body")
+		}
+		return err
+	}
+	return nil
 }
 
 // applyLocked runs the full apply pipeline. Caller must hold s.mu.
@@ -271,6 +402,12 @@ func (s *service) applyLocked(ctx context.Context, desired state.State) error {
 	if err != nil {
 		_ = s.clearLocked(ctx)
 		return fmt.Errorf("resolve shaping: %w", err)
+	}
+
+	// Clear stale rules before conntrack teardown. Old partition drops can
+	// otherwise block the FIN/RST packets emitted by the flush step below.
+	if err := s.clearLocked(ctx); err != nil {
+		return fmt.Errorf("clear previous state: %w", err)
 	}
 
 	// Flush BEFORE installing drop rules so `ss -K`'s FIN/RST can escape
@@ -312,6 +449,11 @@ func (s *service) resolvePartitions(ctx context.Context, ps []state.Partition) (
 		groups, err := s.cfg.Discovery.ResolveGroups(ctx, p.Groups)
 		if err != nil {
 			return nil, fmt.Errorf("partition %q: %w", p.Name, err)
+		}
+		for i, group := range groups {
+			if len(group) == 0 {
+				return nil, fmt.Errorf("partition %q group %d: selector matched no containers", p.Name, i)
+			}
 		}
 		out = append(out, backend.ResolvedPartition{
 			Name:      p.Name,

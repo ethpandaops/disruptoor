@@ -31,10 +31,10 @@ var LayoutTemplateFiles = []string{
 // Config holds the runtime knobs the server needs. Mirrors spamoor's
 // FrontendConfig at a high level but with disruptoor's smaller surface.
 type Config struct {
-	SiteName  string
-	Version   string
-	BuildTime string
-	Debug     bool // disables template caching; reloads from embed.FS each request
+	SiteName     string
+	Version      string
+	AssetVersion string
+	Debug        bool // disables template caching; reloads from embed.FS each request
 }
 
 // Frontend serves static assets from the embedded FS and exposes a 404 hook.
@@ -48,15 +48,15 @@ type Frontend struct {
 // PageData is the top-level template context every page receives. The
 // page-specific payload lives under Data.
 type PageData struct {
-	Active    string
-	Meta      *Meta
-	Data      any
-	Version   string
-	BuildTime string
-	Year      int
-	Title     string
-	Lang      string
-	Debug     bool
+	Active       string
+	Meta         *Meta
+	Data         any
+	Version      string
+	AssetVersion string
+	Year         int
+	Title        string
+	Lang         string
+	Debug        bool
 }
 
 // Meta carries SEO/canonical bits used by the layout template head.
@@ -216,13 +216,13 @@ func (e *Engine) InitPageData(r *http.Request, active, urlPath, title string) *P
 			Domain:      host,
 			Path:        urlPath,
 		},
-		Data:      &struct{}{},
-		Version:   e.cfg.Version,
-		BuildTime: e.cfg.BuildTime,
-		Year:      now.UTC().Year(),
-		Title:     site,
-		Lang:      "en-US",
-		Debug:     e.cfg.Debug,
+		Data:         &struct{}{},
+		Version:      e.cfg.Version,
+		AssetVersion: e.cfg.AssetVersion,
+		Year:         now.UTC().Year(),
+		Title:        site,
+		Lang:         "en-US",
+		Debug:        e.cfg.Debug,
 	}
 }
 

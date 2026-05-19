@@ -111,6 +111,15 @@ func TestStateValidate(t *testing.T) {
 			wantErr: "empty selector",
 		},
 		{
+			name: "asymmetric partition rejected",
+			state: State{Partitions: []Partition{{
+				Name:      "bad",
+				Groups:    []Selector{{All: true}, {Match: map[string][]string{"id": {"alpha"}}}},
+				Symmetric: boolPtr(false),
+			}}},
+			wantErr: "asymmetric partitions are not supported",
+		},
+		{
 			name: "duplicate names",
 			state: State{
 				Partitions: []Partition{{
@@ -250,3 +259,5 @@ func TestPartitionDefaults(t *testing.T) {
 	p2 := Partition{Name: "y", Scope: override}
 	assert.Equal(t, override, p2.EffectiveScope(def))
 }
+
+func boolPtr(v bool) *bool { return &v }

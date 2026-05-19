@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -27,13 +28,13 @@ func TestRoutesRenderWithoutError(t *testing.T) {
 	eventsImpl := &fakeEvents{}
 
 	svc, err := NewService(logger, Config{
-		SiteName:  "disruptoor",
-		Version:   "test",
-		BuildTime: "0",
-		Debug:     false,
-		State:     stateImpl,
-		Discovery: discImpl,
-		Events:    eventsImpl,
+		SiteName:     "disruptoor",
+		Version:      "test",
+		AssetVersion: "0",
+		Debug:        false,
+		State:        stateImpl,
+		Discovery:    discImpl,
+		Events:       eventsImpl,
 	})
 	require.NoError(t, err)
 
@@ -95,6 +96,35 @@ func TestRoutesRenderWithEmptyState(t *testing.T) {
 		_ = res.Body.Close()
 		require.Equalf(t, http.StatusOK, res.StatusCode, "path=%s", path)
 	}
+}
+
+func TestAPIResolveRequiresPOST(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc, err := NewService(logger, Config{
+		SiteName:     "disruptoor",
+		AssetVersion: "0",
+		State:        &fakeState{empty: true},
+		Discovery:    &fakeDisc{},
+		Events:       &fakeEvents{empty: true},
+	})
+	require.NoError(t, err)
+	mux := http.NewServeMux()
+	svc.RegisterRoutes(mux)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	getRes, err := http.Get(srv.URL + "/webui/api/resolve")
+	require.NoError(t, err)
+	_ = getRes.Body.Close()
+	require.Equal(t, http.StatusMethodNotAllowed, getRes.StatusCode)
+
+	postRes, err := http.Post(srv.URL+"/webui/api/resolve", "application/json", bytes.NewBufferString(`"all"`))
+	require.NoError(t, err)
+	defer postRes.Body.Close()
+	body, err := io.ReadAll(postRes.Body)
+	require.NoError(t, err)
+	require.Equalf(t, http.StatusOK, postRes.StatusCode, "body=%s", string(body))
+	require.JSONEq(t, `{"matched":[],"count":0}`, string(body))
 }
 
 type fakeState struct{ empty bool }

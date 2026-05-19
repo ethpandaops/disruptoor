@@ -181,14 +181,15 @@ func run(ctx context.Context, f runFlags) error {
 	}
 
 	if webUIEnabled {
+		assetVersion := time.Now().UTC().Format("2006-01-02T15:04:05Z")
 		webUISvc, err = webui.NewService(logger, webui.Config{
-			SiteName:  "disruptoor",
-			Version:   version,
-			BuildTime: time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-			Debug:     f.webUIDebug,
-			State:     apiSvc,
-			Discovery: disc,
-			Events:    events,
+			SiteName:     "disruptoor",
+			Version:      version,
+			AssetVersion: assetVersion,
+			Debug:        f.webUIDebug,
+			State:        apiSvc,
+			Discovery:    disc,
+			Events:       events,
 		})
 		if err != nil {
 			return fmt.Errorf("webui: %w", err)
