@@ -117,6 +117,7 @@ func (s *service) RegisterRoutes(mux *http.ServeMux) {
 	// 404 for unknown paths, so we mount it on the catch-all GET / route.
 	mux.Handle("GET /css/", s.frontend)
 	mux.Handle("GET /js/", s.frontend)
+	mux.Handle("GET /img/", s.frontend)
 	mux.Handle("GET /webfonts/", s.frontend)
 	mux.Handle("GET /favicon.ico", s.frontend)
 }

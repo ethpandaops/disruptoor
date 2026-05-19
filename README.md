@@ -1,4 +1,8 @@
-# disruptoor
+<p align="center">
+  <img src="./docs/assets/disruptoor-logo.png" alt="disruptoor" width="180" />
+</p>
+
+<h1 align="center">disruptoor</h1>
 
 [![Build master](https://github.com/ethpandaops/disruptoor/actions/workflows/build-master.yml/badge.svg)](https://github.com/ethpandaops/disruptoor/actions/workflows/build-master.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ethpandaops/disruptoor)](https://goreportcard.com/report/github.com/ethpandaops/disruptoor)

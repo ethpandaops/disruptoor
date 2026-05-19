@@ -24,6 +24,13 @@ header.header-bar .navbar-brand {
     margin-right: 0;
 }
 
+.page-brand-logo {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    display: inline-block;
+}
+
 @media (min-width: 992px) {
     header .collapsed-info {
         display: none;
@@ -94,6 +101,73 @@ pre.yaml-block {
 .partition-group .group-title {
     font-weight: 600;
     margin-bottom: .25rem;
+}
+
+.selector-group-list .selector-builder {
+    background: var(--bs-tertiary-bg);
+}
+
+.selector-builder .form-text {
+    margin-top: .25rem;
+}
+
+.selector-builder select[multiple] {
+    min-height: 7rem;
+}
+
+.container-picker {
+    border: 1px solid var(--bs-border-color);
+    border-radius: .25rem;
+    background: var(--bs-body-bg);
+}
+
+.container-picker-toolbar {
+    display: flex;
+    gap: .5rem;
+    padding: .375rem .5rem;
+    border-bottom: 1px solid var(--bs-border-color);
+    background: var(--bs-tertiary-bg);
+    border-top-left-radius: .25rem;
+    border-top-right-radius: .25rem;
+}
+
+.container-picker-toolbar .container-picker-filter {
+    flex: 1;
+    min-width: 0;
+}
+
+.container-picker-list {
+    max-height: 10rem;
+    overflow-y: auto;
+    padding: .25rem .5rem;
+}
+
+.container-picker-item {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .15rem .25rem;
+    margin: 0;
+    cursor: pointer;
+    user-select: none;
+    border-radius: .2rem;
+}
+
+.container-picker-item:hover {
+    background: var(--bs-tertiary-bg);
+}
+
+.container-picker-item .form-check-input {
+    margin: 0;
+    float: none;
+}
+
+.container-picker-name {
+    line-height: 1.2;
+}
+
+.container-picker-empty {
+    padding: .5rem;
 }
 
 .event-row td {

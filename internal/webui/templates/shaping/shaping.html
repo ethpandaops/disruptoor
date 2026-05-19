@@ -74,7 +74,7 @@
     <div class="modal fade" id="addShapingModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg">
         <div class="modal-content">
-          <form id="shaping-add-form">
+          <form id="shaping-add-form" novalidate>
             <div class="modal-header">
               <h5 class="modal-title">Add shaping rule</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -86,18 +86,25 @@
                   <input type="text" name="name" class="form-control" placeholder="jitter-everything" required>
                 </div>
                 <div class="col-md-6 mb-3">
-                  <label class="form-label">Target ("all" or JSON object)</label>
-                  <input type="text" name="target" class="form-control font-monospace" placeholder='all' required>
+                  <label class="form-label">Acknowledge scope</label>
+                  <div class="form-check pt-2">
+                    <input class="form-check-input" type="checkbox" name="scope" value="include_control" id="shape-scope-control" checked required>
+                    <label class="form-check-label" for="shape-scope-control">
+                      <code>include_control</code>
+                    </label>
+                  </div>
+                  <div class="form-text">
+                    v0 tc affects all egress traffic. Required.
+                  </div>
                 </div>
               </div>
+
               <div class="mb-3">
-                <label class="form-label">Scope (comma-separated)</label>
-                <input type="text" name="scope" class="form-control" value="include_control" required>
-                <div class="form-text">
-                  v0 tc affects all egress traffic. You must acknowledge this by setting
-                  scope to <code>include_control</code>.
-                </div>
+                <label class="form-label">Target</label>
+                <div id="shaping-target" class="selector-group-list"></div>
+                <div id="shaping-discovery-warning" class="form-text text-warning d-none"></div>
               </div>
+
               <div class="row">
                 <div class="col-md-3 mb-3">
                   <label class="form-label">Delay</label>
@@ -127,4 +134,59 @@
       </div>
     </div>
   </div>
+
+  <!-- Selector-builder template (cloned by JS). -->
+  <template id="selector-builder-template">
+    <div class="selector-builder card mb-2" data-component="selector-builder">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong class="selector-builder-title">Target</strong>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove-selector" title="Remove">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-4">
+            <select class="form-select form-select-sm" data-role="mode">
+              <option value="all" selected>All containers</option>
+              <option value="containers">Specific containers</option>
+              <option value="label">Custom label match</option>
+            </select>
+          </div>
+          <div class="col-md-8">
+            <div data-role="mode-panel-all">
+              <span class="text-muted small">Matches every container in the enclave.</span>
+            </div>
+            <div data-role="mode-panel-containers" class="d-none">
+              <div class="container-picker">
+                <div class="container-picker-toolbar">
+                  <input type="search" class="form-control form-control-sm container-picker-filter" data-role="container-filter" placeholder="Filter…" aria-label="Filter containers">
+                  <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary" data-role="picker-all">All</button>
+                    <button type="button" class="btn btn-outline-secondary" data-role="picker-none">None</button>
+                  </div>
+                </div>
+                <div class="container-picker-list" data-role="container-picker"></div>
+              </div>
+              <div class="form-text" data-role="container-help">Tick one or more containers. Names are taken from the <code>com.kurtosistech.id</code> label.</div>
+            </div>
+            <div data-role="mode-panel-label" class="d-none">
+              <div class="row g-2">
+                <div class="col-5">
+                  <input type="text" class="form-control form-control-sm font-monospace" data-role="label-key" placeholder="client" list="discovered-label-keys">
+                </div>
+                <div class="col-7">
+                  <input type="text" class="form-control form-control-sm font-monospace" data-role="label-values" placeholder="lighthouse, prysm">
+                </div>
+              </div>
+              <div class="form-text">
+                Keys without a <code>.</code> get the <code>com.kurtosistech.custom.ethereum-package.</code> prefix. Multiple values OR together.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+  <datalist id="discovered-label-keys"></datalist>
 {{ end }}
