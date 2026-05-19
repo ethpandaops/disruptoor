@@ -90,6 +90,24 @@ func TestApplyRejectsEmptyPartitionGroups(t *testing.T) {
 	require.ErrorContains(t, err, "selector matched no containers")
 }
 
+func TestStatePutApplyErrorUsesStableResponse(t *testing.T) {
+	svc := newTestServiceWithDiscovery(emptyGroupDiscovery{})
+	body, err := json.Marshal(namedPartitionState("empty-group"))
+	require.NoError(t, err)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/v1/state", bytes.NewReader(body))
+	svc.handlePutState(rec, req)
+
+	res := rec.Result()
+	defer res.Body.Close()
+	respBody, err := io.ReadAll(res.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	require.JSONEq(t, `{"error":"apply failed; rolled back to empty state"}`, string(respBody))
+	require.NotContains(t, string(respBody), "selector matched no containers")
+}
+
 func TestApplyClearsPreviousStateBeforeConntrackFlush(t *testing.T) {
 	ops := &opLog{}
 	svc := newTestServiceWithOps(ops)

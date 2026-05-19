@@ -1,9 +1,11 @@
 // Package api exposes the disruptoor HTTP API and reconciles desired
 // state against the live system. Every PUT /v1/state replaces the entire
-// applied state: backends are cleared, the new state is resolved against
-// Docker, and applied in order (conntrack flush → iptables → tc).
+// applied state: the new state is resolved against Docker, stale backend
+// rules are cleared, then the new state is applied in order (conntrack
+// flush → iptables → tc).
 //
-// The flush-before-iptables ordering is intentional. `ss -K` inside
+// The clear-before-flush and flush-before-iptables ordering is intentional.
+// Old drop rules must be removed before `ss -K` runs, and `ss -K` inside
 // conntrack.Flush kills established sockets, which makes the kernel emit
 // FIN/RST to the peer. If we installed OUTPUT DROP rules first, those
 // teardown packets would be dropped by our own chain and the peer would
@@ -170,7 +172,7 @@ func (s *service) Apply(ctx context.Context, desired state.State) error {
 		return err
 	}
 	s.applied = cloneState(desired)
-	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "config", State: cloneState(s.applied)})
+	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "config", State: cloneState(desired)})
 	return nil
 }
 
@@ -222,6 +224,13 @@ func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nextApplied := cloneState(desired)
+	newETag, err := StateETag(nextApplied)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	if err := s.applyLocked(r.Context(), desired); err != nil {
 		// applyLocked invokes clearLocked on every failure path so the
 		// kernel ends up in a known-empty state; reflect that in s.applied
@@ -230,16 +239,11 @@ func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 		s.logger.ErrorContext(r.Context(), "apply failed; rolled back to empty",
 			slog.String("error", err.Error()))
 		s.emit(Event{Kind: EventApplyFailed, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, Error: err.Error()})
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusInternalServerError, errors.New("apply failed; rolled back to empty state"))
 		return
 	}
-	s.applied = cloneState(desired)
-	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, State: cloneState(s.applied)})
-	newETag, err := StateETag(s.applied)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
+	s.applied = nextApplied
+	s.emit(Event{Kind: EventApplied, At: time.Now(), Source: "http", RemoteAddr: r.RemoteAddr, State: cloneState(desired)})
 	w.Header().Set("ETag", newETag)
 	writeJSON(w, http.StatusOK, s.applied)
 }
@@ -400,6 +404,8 @@ func (s *service) applyLocked(ctx context.Context, desired state.State) error {
 		return fmt.Errorf("resolve shaping: %w", err)
 	}
 
+	// Clear stale rules before conntrack teardown. Old partition drops can
+	// otherwise block the FIN/RST packets emitted by the flush step below.
 	if err := s.clearLocked(ctx); err != nil {
 		return fmt.Errorf("clear previous state: %w", err)
 	}
