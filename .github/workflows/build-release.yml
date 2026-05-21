@@ -62,15 +62,12 @@ jobs:
     name: "Run code checks"
     needs: [release_info]
     uses: ./.github/workflows/_shared-check.yaml
-    with:
-      ref: ${{ needs.release_info.outputs.ref }}
 
   build_binaries:
     name: "Build disruptoor"
     needs: [release_info, check_source]
     uses: ./.github/workflows/_shared-build.yaml
     with:
-      ref: ${{ needs.release_info.outputs.ref }}
       release: ${{ needs.release_info.outputs.tag }}
       docker: true
       docker_repository: "ethpandaops/disruptoor"

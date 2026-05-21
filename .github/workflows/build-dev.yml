@@ -3,9 +3,6 @@ name: Build dev image
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: "Git ref to build (defaults to selected workflow ref)"
-        required: false
       docker_tag:
         description: "Docker tag prefix"
         required: true
@@ -22,20 +19,16 @@ jobs:
     name: "Validate build inputs"
     runs-on: ubuntu-latest
     outputs:
-      ref: ${{ steps.loadinfo.outputs.ref }}
       docker_tag: ${{ steps.loadinfo.outputs.tag }}
     steps:
     - name: "Resolve build inputs"
       id: loadinfo
       shell: bash
       env:
-        INPUT_REF: ${{ inputs.ref }}
         INPUT_DOCKER_TAG: ${{ inputs.docker_tag }}
-        GIT_SHA: ${{ github.sha }}
       run: |
         set -euo pipefail
 
-        ref="${INPUT_REF:-$GIT_SHA}"
         tag="$INPUT_DOCKER_TAG"
 
         if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,120}$ ]]; then
@@ -48,22 +41,18 @@ jobs:
           exit 1
         fi
 
-        echo "ref=$ref" >> "$GITHUB_OUTPUT"
         echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   check_source:
     name: "Run code checks"
     needs: [build_info]
     uses: ./.github/workflows/_shared-check.yaml
-    with:
-      ref: ${{ needs.build_info.outputs.ref }}
 
   build_binaries:
     name: "Build disruptoor"
     needs: [build_info, check_source]
     uses: ./.github/workflows/_shared-build.yaml
     with:
-      ref: ${{ needs.build_info.outputs.ref }}
       release: "snapshot"
       docker: true
       docker_repository: "ethpandaops/disruptoor"
