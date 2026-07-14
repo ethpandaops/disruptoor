@@ -2,7 +2,7 @@
   <div class="container mt-2">
 
     <div class="row g-3 mt-1">
-      <div class="col-12 col-md-4">
+      <div class="col-12 col-md-3">
         <div class="card">
           <div class="card-body">
             <div class="text-uppercase small text-muted">Enclave</div>
@@ -12,7 +12,7 @@
           </div>
         </div>
       </div>
-      <div class="col-6 col-md-4">
+      <div class="col-4 col-md-3">
         <div class="card">
           <div class="card-body">
             <div class="text-uppercase small text-muted">Partitions</div>
@@ -20,7 +20,15 @@
           </div>
         </div>
       </div>
-      <div class="col-6 col-md-4">
+      <div class="col-4 col-md-3">
+        <div class="card">
+          <div class="card-body">
+            <div class="text-uppercase small text-muted">Isolations</div>
+            <div class="fs-3">{{ .IsolationsCount }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-4 col-md-3">
         <div class="card">
           <div class="card-body">
             <div class="text-uppercase small text-muted">Shaping rules</div>
@@ -38,11 +46,14 @@
             <a class="btn btn-outline-primary btn-sm" href="/partitions">
               <i class="fas fa-plus me-1"></i> Add partition
             </a>
+            <a class="btn btn-outline-primary btn-sm" href="/partitions">
+              <i class="fas fa-plus me-1"></i> Add isolation
+            </a>
             <a class="btn btn-outline-primary btn-sm" href="/shaping">
               <i class="fas fa-plus me-1"></i> Add shaping
             </a>
             <button class="btn btn-danger btn-sm" data-action="clear-all"
-                    {{ if and (eq .PartitionsCount 0) (eq .ShapingCount 0) }}disabled{{ end }}>
+                    {{ if and (eq .PartitionsCount 0) (eq .IsolationsCount 0) (eq .ShapingCount 0) }}disabled{{ end }}>
               <i class="fas fa-trash me-1"></i> Clear all
             </button>
           </div>
@@ -73,6 +84,31 @@
               </table>
             {{ else }}
               <p class="text-muted mb-0">No active partitions.</p>
+            {{ end }}
+          </div>
+        </div>
+      </div>
+      <div class="col-12 col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <h5 class="card-title">Active isolations</h5>
+            {{ if .Isolations }}
+              <table class="table table-sm table-borderless mb-0">
+                <thead><tr><th>Name</th><th>Scope</th></tr></thead>
+                <tbody>
+                  {{ range .Isolations }}
+                    <tr>
+                      <td class="font-monospace">{{ .Name }}</td>
+                      <td>
+                        {{ range .Scope }}<span class="scope-pill">{{ . }}</span>{{ end }}
+                        {{ if not .Scope }}<span class="text-muted small">default</span>{{ end }}
+                      </td>
+                    </tr>
+                  {{ end }}
+                </tbody>
+              </table>
+            {{ else }}
+              <p class="text-muted mb-0">No active isolations.</p>
             {{ end }}
           </div>
         </div>
@@ -124,7 +160,7 @@
                   </td>
                   <td class="small">{{ orDash .Source }}</td>
                   <td class="small text-muted">
-                    {{ if .Error }}{{ .Error }}{{ else }}{{ len .State.Partitions }} partition(s), {{ len .State.Shaping }} shaping{{ end }}
+                    {{ if .Error }}{{ .Error }}{{ else }}{{ len .State.Partitions }} partition(s), {{ len .State.Isolations }} isolation(s), {{ len .State.Shaping }} shaping{{ end }}
                   </td>
                 </tr>
               {{ end }}

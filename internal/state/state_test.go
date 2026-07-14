@@ -136,6 +136,67 @@ func TestStateValidate(t *testing.T) {
 			wantErr: "duplicate name",
 		},
 		{
+			name: "valid isolation",
+			state: State{Isolations: []Isolation{{
+				Name:   "blackout",
+				Target: &Selector{Match: map[string][]string{"node-index": {"1"}}},
+				Scope:  []string{ScopeCLP2P, ScopeELP2P, ScopeControl},
+			}}},
+		},
+		{
+			name: "isolation without name",
+			state: State{Isolations: []Isolation{{
+				Target: &Selector{Match: map[string][]string{"id": {"alpha"}}},
+			}}},
+			wantErr: "name required",
+		},
+		{
+			name: "isolation without target",
+			state: State{Isolations: []Isolation{{
+				Name: "bad",
+			}}},
+			wantErr: "target required",
+		},
+		{
+			name: "isolation of all rejected",
+			state: State{Isolations: []Isolation{{
+				Name:   "bad",
+				Target: &Selector{All: true},
+			}}},
+			wantErr: `target cannot be "all"`,
+		},
+		{
+			name: "isolation empty target selector",
+			state: State{Isolations: []Isolation{{
+				Name:   "bad",
+				Target: &Selector{},
+			}}},
+			wantErr: "empty selector",
+		},
+		{
+			name: "isolation unknown scope",
+			state: State{Isolations: []Isolation{{
+				Name:   "bad",
+				Target: &Selector{Match: map[string][]string{"id": {"alpha"}}},
+				Scope:  []string{"made_up"},
+			}}},
+			wantErr: "unknown scope",
+		},
+		{
+			name: "isolation name colliding with partition",
+			state: State{
+				Partitions: []Partition{{
+					Name:   "x",
+					Groups: []Selector{{All: true}, {All: true}},
+				}},
+				Isolations: []Isolation{{
+					Name:   "x",
+					Target: &Selector{Match: map[string][]string{"id": {"alpha"}}},
+				}},
+			},
+			wantErr: "duplicate name",
+		},
+		{
 			name: "valid shaping",
 			state: State{Shaping: []Shaping{{
 				Name:   "ok",
@@ -258,6 +319,30 @@ func TestPartitionDefaults(t *testing.T) {
 	override := []string{ScopeCLP2P}
 	p2 := Partition{Name: "y", Scope: override}
 	assert.Equal(t, override, p2.EffectiveScope(def))
+}
+
+func TestIsolationDefaults(t *testing.T) {
+	def := []string{ScopeCLP2P, ScopeELP2P}
+	iso := Isolation{Name: "x"}
+	assert.Equal(t, def, iso.EffectiveScope(def))
+
+	override := []string{ScopeCLP2P, ScopeELP2P, ScopeControl}
+	iso2 := Isolation{Name: "y", Scope: override}
+	assert.Equal(t, override, iso2.EffectiveScope(def))
+}
+
+func TestIsolationJSONRoundTrip(t *testing.T) {
+	in := `{"isolations":[{"name":"blackout","target":{"node-index":[1]},"scope":["cl_p2p","el_p2p","include_control"]}]}`
+	var s State
+	require.NoError(t, json.Unmarshal([]byte(in), &s))
+	require.Len(t, s.Isolations, 1)
+	require.NotNil(t, s.Isolations[0].Target)
+	assert.Equal(t, map[string][]string{"node-index": {"1"}}, s.Isolations[0].Target.Match)
+	require.NoError(t, s.Validate())
+
+	out, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"isolations":[{"name":"blackout","target":{"node-index":["1"]},"scope":["cl_p2p","el_p2p","include_control"]}]}`, string(out))
 }
 
 func boolPtr(v bool) *bool { return &v }

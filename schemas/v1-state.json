@@ -10,6 +10,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/partition" }
     },
+    "isolations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/isolation" }
+    },
     "shaping": {
       "type": "array",
       "items": { "$ref": "#/$defs/shaping" }
@@ -69,6 +73,23 @@
           "type": "boolean",
           "const": true,
           "description": "Defaults to true. v0 only supports symmetric partitions."
+        }
+      }
+    },
+    "isolation": {
+      "description": "Cuts the containers matched by target off from the rest of the enclave. The counterparty set is computed at apply time as the complement of target; semantically a symmetric two-group partition of target vs the rest of the enclave. A multi-container target is isolated as a group (traffic among its members is unaffected); declare one isolation per container to black out several containers individually.",
+      "type": "object",
+      "required": ["name", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "target": {
+          "$ref": "#/$defs/selector",
+          "description": "Must be a label-match object; the literal \"all\" is rejected because isolating everything leaves nothing to isolate from."
+        },
+        "scope": {
+          "$ref": "#/$defs/scope",
+          "description": "Defaults to [cl_p2p, el_p2p] when omitted."
         }
       }
     },

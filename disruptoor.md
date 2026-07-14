@@ -127,6 +127,13 @@ Declarative, versioned, idempotent.
       "scope": ["cl_p2p", "el_p2p"]
     }
   ],
+  "isolations": [
+    {
+      "name": "blackout-node-5",
+      "target": { "node-index": "5" },
+      "scope": ["cl_p2p", "el_p2p", "include_control"]
+    }
+  ],
   "shaping": [
     {
       "name": "dial-up-node",
@@ -146,6 +153,7 @@ Declarative, versioned, idempotent.
 - **Auth by network.** Controller binds only to the enclave network. No tokens. Opt-in `expose: true` to publish on the host.
 - **Stable selectors.** The standalone API accepts label selectors. Higher-level package integrations can translate participant names into these selectors.
 - **Validation.** Reject configs at PUT time: same node in two groups, unknown participants, contradictory shaping rules.
+- **Isolations.** `isolations` cuts a target selector off from every other container in the enclave; the counterparty group is the complement of the target, computed at apply time. This covers the "isolate one node" scenario that partitions cannot express (groups must be disjoint and there is no negation selector).
 
 ## Configuration block in ethereum-package
 

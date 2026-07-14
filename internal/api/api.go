@@ -286,6 +286,16 @@ func cloneState(s state.State) state.State {
 			}
 		}
 	}
+	if len(s.Isolations) > 0 {
+		out.Isolations = make([]state.Isolation, len(s.Isolations))
+		for i, iso := range s.Isolations {
+			out.Isolations[i] = state.Isolation{
+				Name:   iso.Name,
+				Target: cloneSelectorPtr(iso.Target),
+				Scope:  cloneStrings(iso.Scope),
+			}
+		}
+	}
 	if len(s.Shaping) > 0 {
 		out.Shaping = make([]state.Shaping, len(s.Shaping))
 		for i, sh := range s.Shaping {
@@ -398,6 +408,12 @@ func (s *service) applyLocked(ctx context.Context, desired state.State) error {
 		_ = s.clearLocked(ctx)
 		return fmt.Errorf("resolve partitions: %w", err)
 	}
+	resolvedIsolations, err := s.resolveIsolations(ctx, desired.Isolations)
+	if err != nil {
+		_ = s.clearLocked(ctx)
+		return fmt.Errorf("resolve isolations: %w", err)
+	}
+	resolvedPartitions = append(resolvedPartitions, resolvedIsolations...)
 	resolvedShaping, err := s.resolveShaping(ctx, desired.Shaping)
 	if err != nil {
 		_ = s.clearLocked(ctx)
@@ -465,6 +481,40 @@ func (s *service) resolvePartitions(ctx context.Context, ps []state.Partition) (
 	return out, nil
 }
 
+// resolveIsolations expands each isolation into a two-group partition:
+// the target selector vs the complement of its match set. Reusing
+// ResolvedPartition means the conntrack and iptables backends need no
+// isolation-specific code paths.
+func (s *service) resolveIsolations(ctx context.Context, isos []state.Isolation) ([]backend.ResolvedPartition, error) {
+	defaultScope := []string{"cl_p2p", "el_p2p"}
+	out := make([]backend.ResolvedPartition, 0, len(isos))
+	for _, iso := range isos {
+		// Validate guarantees iso.Target is non-nil, non-empty, and not "all".
+		target, err := s.cfg.Discovery.Resolve(ctx, *iso.Target)
+		if err != nil {
+			return nil, fmt.Errorf("isolation %q: %w", iso.Name, err)
+		}
+		if len(target) == 0 {
+			return nil, fmt.Errorf("isolation %q: target matched no containers", iso.Name)
+		}
+		everyone, err := s.cfg.Discovery.Resolve(ctx, state.Selector{All: true})
+		if err != nil {
+			return nil, fmt.Errorf("isolation %q: resolve enclave containers: %w", iso.Name, err)
+		}
+		rest := subtractContainers(everyone, target)
+		if len(rest) == 0 {
+			return nil, fmt.Errorf("isolation %q: target matches every container in the enclave; nothing to isolate from", iso.Name)
+		}
+		out = append(out, backend.ResolvedPartition{
+			Name:      iso.Name,
+			Groups:    [][]discovery.Container{target, rest},
+			Scope:     iso.EffectiveScope(defaultScope),
+			Symmetric: true,
+		})
+	}
+	return out, nil
+}
+
 func (s *service) resolveShaping(ctx context.Context, sh []state.Shaping) ([]backend.ResolvedShaping, error) {
 	out := make([]backend.ResolvedShaping, 0, len(sh))
 	for _, r := range sh {
@@ -484,6 +534,23 @@ func (s *service) resolveShaping(ctx context.Context, sh []state.Shaping) ([]bac
 		})
 	}
 	return out, nil
+}
+
+// subtractContainers returns the containers in from that are not in remove,
+// keyed by container ID. Order of from is preserved.
+func subtractContainers(from, remove []discovery.Container) []discovery.Container {
+	removeIDs := make(map[string]struct{}, len(remove))
+	for _, c := range remove {
+		removeIDs[c.ID] = struct{}{}
+	}
+	out := make([]discovery.Container, 0, len(from))
+	for _, c := range from {
+		if _, drop := removeIDs[c.ID]; drop {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // statusRecorder wraps http.ResponseWriter to capture the status code that

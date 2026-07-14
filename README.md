@@ -59,6 +59,36 @@ Verify it bit (alpha can no longer reach bravo's discovery port):
 docker exec disruptoor-test-alpha nc -vz 172.30.0.11 30303
 ```
 
+Or isolate a single container from **everything else** without enumerating the
+counterparties — the complement of `target` is computed at apply time, so the
+same request keeps working when the enclave topology changes:
+
+```bash
+curl -X PUT http://localhost:7700/v1/state \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "isolations": [
+      {
+        "name": "blackout-alpha",
+        "target": {"id": "alpha"},
+        "scope": ["cl_p2p", "el_p2p", "include_control"]
+      }
+    ]
+  }'
+```
+
+An isolation is semantically a symmetric two-group partition of `target` vs
+the rest of the enclave. `scope` defaults to `[cl_p2p, el_p2p]`; add
+`include_control` to also cut RPC/engine/metrics/VC↔CL traffic (a full
+blackout). The target must not match every container — there'd be nothing
+left to isolate from.
+
+A target matching multiple containers is isolated **as a group**: traffic
+among its members keeps flowing (useful for "island" scenarios, e.g. cutting
+all beacon nodes off from their EL/VC stacks while they still gossip with
+each other). To black out several containers individually, declare one
+isolation per container.
+
 Heal everything:
 
 ```bash
