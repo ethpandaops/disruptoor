@@ -47,12 +47,17 @@ type Partition struct {
 	Symmetric *bool      `json:"symmetric,omitempty"`
 }
 
-// Isolation cuts every container matched by Target off from every other
-// container in the enclave. The counterparty set ("everyone else") is
-// computed at apply time as the complement of Target, so callers don't
-// enumerate it — a Partition cannot express this because its groups must
-// be disjoint and there is no negation selector. Semantically an isolation
-// is a symmetric two-group partition: Target vs the rest of the enclave.
+// Isolation cuts the containers matched by Target off from the rest of the
+// enclave. The counterparty set ("everyone else") is computed at apply time
+// as the complement of Target, so callers don't enumerate it — a Partition
+// cannot express this because its groups must be disjoint and there is no
+// negation selector. Semantically an isolation is a symmetric two-group
+// partition: Target vs the rest of the enclave.
+//
+// When Target matches more than one container, the matched set is isolated
+// AS A GROUP: traffic among its members is unaffected. To black out several
+// containers individually (no traffic between them either), declare one
+// isolation per container.
 type Isolation struct {
 	Name   string    `json:"name"`
 	Target *Selector `json:"target,omitempty"`

@@ -131,6 +131,30 @@ func TestApplyIsolationResolvesComplement(t *testing.T) {
 	require.True(t, part.Symmetric)
 }
 
+// A target matching multiple containers is isolated as a group: its members
+// end up in the same partition group, so traffic among them is unaffected.
+// This is load-bearing API semantics — callers wanting per-container
+// blackouts declare one isolation each.
+func TestApplyIsolationKeepsMultiMatchTargetAsOneGroup(t *testing.T) {
+	ipt := &recordingIptables{}
+	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo", "charlie", "delta"})
+	svc.cfg.Iptables = ipt
+
+	require.NoError(t, svc.Apply(context.Background(), state.State{
+		Isolations: []state.Isolation{{
+			Name:   "island",
+			Target: &state.Selector{Match: map[string][]string{"id": {"alpha", "bravo"}}},
+		}},
+	}))
+
+	require.Len(t, ipt.partitions, 1)
+	part := ipt.partitions[0]
+	require.Len(t, part.Groups, 2)
+	require.Equal(t, []string{"alpha", "bravo"}, containerNames(part.Groups[0]),
+		"matched containers must share one group so intra-target traffic keeps flowing")
+	require.Equal(t, []string{"charlie", "delta"}, containerNames(part.Groups[1]))
+}
+
 func TestApplyAppendsIsolationsAfterPartitions(t *testing.T) {
 	ipt := &recordingIptables{}
 	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo", "charlie"})

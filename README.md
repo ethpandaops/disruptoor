@@ -83,6 +83,12 @@ the rest of the enclave. `scope` defaults to `[cl_p2p, el_p2p]`; add
 blackout). The target must not match every container — there'd be nothing
 left to isolate from.
 
+A target matching multiple containers is isolated **as a group**: traffic
+among its members keeps flowing (useful for "island" scenarios, e.g. cutting
+all beacon nodes off from their EL/VC stacks while they still gossip with
+each other). To black out several containers individually, declare one
+isolation per container.
+
 Heal everything:
 
 ```bash

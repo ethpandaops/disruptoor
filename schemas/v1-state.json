@@ -77,7 +77,7 @@
       }
     },
     "isolation": {
-      "description": "Cuts every container matched by target off from every other container in the enclave. The counterparty set is computed at apply time as the complement of target; semantically a symmetric two-group partition of target vs the rest of the enclave.",
+      "description": "Cuts the containers matched by target off from the rest of the enclave. The counterparty set is computed at apply time as the complement of target; semantically a symmetric two-group partition of target vs the rest of the enclave. A multi-container target is isolated as a group (traffic among its members is unaffected); declare one isolation per container to black out several containers individually.",
       "type": "object",
       "required": ["name", "target"],
       "additionalProperties": false,
