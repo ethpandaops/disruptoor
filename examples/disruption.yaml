@@ -15,6 +15,19 @@ partitions:
     # scope omitted → defaults to [cl_p2p, el_p2p]
     # symmetric omitted → defaults to true
 
+# Isolations cut a target off from every other container in the enclave.
+# The counterparty group is computed at apply time as the complement of
+# target, so it never needs to be enumerated (and stays correct when the
+# enclave topology changes). Commented out here because it would overlap
+# with the alpha-vs-bravo partition above in the 2-container smoke harness.
+#
+# isolations:
+#   - name: blackout-alpha
+#     target: { id: alpha }
+#     # scope omitted → defaults to [cl_p2p, el_p2p]; add include_control
+#     # to also cut RPC/engine/metrics/VC-CL traffic:
+#     # scope: [cl_p2p, el_p2p, include_control]
+
 shaping:
   - name: jitter-everything
     target: all

@@ -108,6 +108,100 @@ func TestStatePutApplyErrorUsesStableResponse(t *testing.T) {
 	require.NotContains(t, string(respBody), "selector matched no containers")
 }
 
+func TestApplyIsolationResolvesComplement(t *testing.T) {
+	ipt := &recordingIptables{}
+	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo", "charlie"})
+	svc.cfg.Iptables = ipt
+
+	require.NoError(t, svc.Apply(context.Background(), state.State{
+		Isolations: []state.Isolation{{
+			Name:   "blackout-alpha",
+			Target: &state.Selector{Match: map[string][]string{"id": {"alpha"}}},
+			Scope:  []string{state.ScopeCLP2P, state.ScopeELP2P, state.ScopeControl},
+		}},
+	}))
+
+	require.Len(t, ipt.partitions, 1)
+	part := ipt.partitions[0]
+	require.Equal(t, "blackout-alpha", part.Name)
+	require.Len(t, part.Groups, 2)
+	require.Equal(t, []string{"alpha"}, containerNames(part.Groups[0]))
+	require.Equal(t, []string{"bravo", "charlie"}, containerNames(part.Groups[1]))
+	require.Equal(t, []string{state.ScopeCLP2P, state.ScopeELP2P, state.ScopeControl}, part.Scope)
+	require.True(t, part.Symmetric)
+}
+
+func TestApplyAppendsIsolationsAfterPartitions(t *testing.T) {
+	ipt := &recordingIptables{}
+	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo", "charlie"})
+	svc.cfg.Iptables = ipt
+
+	require.NoError(t, svc.Apply(context.Background(), state.State{
+		Partitions: []state.Partition{{
+			Name: "split",
+			Groups: []state.Selector{
+				{Match: map[string][]string{"id": {"alpha"}}},
+				{Match: map[string][]string{"id": {"bravo"}}},
+			},
+		}},
+		Isolations: []state.Isolation{{
+			Name:   "blackout-charlie",
+			Target: &state.Selector{Match: map[string][]string{"id": {"charlie"}}},
+		}},
+	}))
+
+	require.Len(t, ipt.partitions, 2)
+	require.Equal(t, "split", ipt.partitions[0].Name)
+	require.Equal(t, "blackout-charlie", ipt.partitions[1].Name)
+	// Isolation with no scope inherits the partition default.
+	require.Equal(t, []string{state.ScopeCLP2P, state.ScopeELP2P}, ipt.partitions[1].Scope)
+}
+
+func TestApplyIsolationTargetMatchingNothingFails(t *testing.T) {
+	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo"})
+
+	err := svc.Apply(context.Background(), state.State{
+		Isolations: []state.Isolation{{
+			Name:   "ghost",
+			Target: &state.Selector{Match: map[string][]string{"id": {"missing"}}},
+		}},
+	})
+
+	require.ErrorContains(t, err, "target matched no containers")
+}
+
+func TestApplyIsolationTargetMatchingEverythingFails(t *testing.T) {
+	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo"})
+
+	err := svc.Apply(context.Background(), state.State{
+		Isolations: []state.Isolation{{
+			Name:   "everyone",
+			Target: &state.Selector{Match: map[string][]string{"id": {"alpha", "bravo"}}},
+		}},
+	})
+
+	require.ErrorContains(t, err, "nothing to isolate from")
+}
+
+func TestGetStateDeepCopiesIsolations(t *testing.T) {
+	svc := newTestServiceWithDiscovery(inventoryDiscovery{"alpha", "bravo"})
+	require.NoError(t, svc.Apply(context.Background(), state.State{
+		Isolations: []state.Isolation{{
+			Name:   "blackout",
+			Target: &state.Selector{Match: map[string][]string{"id": {"alpha"}}},
+			Scope:  []string{state.ScopeCLP2P},
+		}},
+	}))
+
+	got := svc.GetState()
+	got.Isolations[0].Target.Match["id"][0] = "mutated"
+	got.Isolations[0].Scope[0] = state.ScopeControl
+
+	current := svc.GetState()
+	require.Equal(t, "alpha", current.Isolations[0].Target.Match["id"][0])
+	require.Equal(t, state.ScopeCLP2P, current.Isolations[0].Scope[0])
+}
+
 func TestApplyClearsPreviousStateBeforeConntrackFlush(t *testing.T) {
 	ops := &opLog{}
 	svc := newTestServiceWithOps(ops)
@@ -224,6 +318,66 @@ func (fakeDiscovery) ResolveGroups(_ context.Context, sels []state.Selector) ([]
 	}
 	return out, nil
 }
+
+// inventoryDiscovery resolves selectors against a fixed container inventory:
+// the All selector matches everything, and Match selectors are honoured for
+// the "id" key only (values name containers directly).
+type inventoryDiscovery []string
+
+func (inventoryDiscovery) Start(context.Context) error { return nil }
+func (inventoryDiscovery) Stop() error                 { return nil }
+func (inventoryDiscovery) EnclaveID() string           { return "test" }
+func (d inventoryDiscovery) Resolve(_ context.Context, sel state.Selector) ([]discovery.Container, error) {
+	out := make([]discovery.Container, 0, len(d))
+	for _, name := range d {
+		if sel.All || containsValue(sel.Match["id"], name) {
+			out = append(out, discovery.Container{ID: name, Name: name})
+		}
+	}
+	return out, nil
+}
+
+func (d inventoryDiscovery) ResolveGroups(ctx context.Context, sels []state.Selector) ([][]discovery.Container, error) {
+	out := make([][]discovery.Container, len(sels))
+	for i, sel := range sels {
+		matched, err := d.Resolve(ctx, sel)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = matched
+	}
+	return out, nil
+}
+
+func containsValue(values []string, target string) bool {
+	for _, v := range values {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containerNames(cs []discovery.Container) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
+// recordingIptables captures the resolved partitions passed to Apply.
+type recordingIptables struct {
+	partitions []backend.ResolvedPartition
+}
+
+func (*recordingIptables) Start(context.Context) error { return nil }
+func (*recordingIptables) Stop() error                 { return nil }
+func (r *recordingIptables) Apply(_ context.Context, ps []backend.ResolvedPartition) error {
+	r.partitions = ps
+	return nil
+}
+func (*recordingIptables) Clear(context.Context) error { return nil }
 
 type emptyGroupDiscovery struct {
 	fakeDiscovery
