@@ -66,16 +66,20 @@ jobs:
   build_binaries:
     name: "Build disruptoor"
     needs: [release_info, check_source]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/_shared-build.yaml
     with:
       release: ${{ needs.release_info.outputs.tag }}
       docker: true
-      docker_repository: "ethpandaops/disruptoor"
+      docker_repository: "ghcr.io/ethpandaops/disruptoor"
       docker_tag_prefix: ${{ needs.release_info.outputs.tag }}
       additional_tags: '["${{ needs.release_info.outputs.tag }}","latest"]'
     secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      IMAGE_MIRROR_URL: ${{ secrets.IMAGE_MIRROR_URL }}
 
   publish_release_assets:
     name: Publish Release Assets
