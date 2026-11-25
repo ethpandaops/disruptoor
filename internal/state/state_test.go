@@ -296,6 +296,30 @@ func TestStateValidate(t *testing.T) {
 			}}},
 			wantErr: "unknown scope",
 		},
+		{
+			name:  "shaping values in accepted formats",
+			state: shapingState(Shaping{Delay: "1.5S", Jitter: "250us", Loss: "0.5", Bandwidth: "10Mbit"}),
+		},
+		{
+			name:    "delay with two values",
+			state:   shapingState(Shaping{Delay: "100ms 10ms"}),
+			wantErr: `delay "100ms 10ms"`,
+		},
+		{
+			name:    "jitter as a netem keyword",
+			state:   shapingState(Shaping{Delay: "100ms", Jitter: "ecn"}),
+			wantErr: `jitter "ecn"`,
+		},
+		{
+			name:    "loss above 100 percent",
+			state:   shapingState(Shaping{Loss: "100.5%"}),
+			wantErr: "above 100%",
+		},
+		{
+			name:    "bandwidth without a unit",
+			state:   shapingState(Shaping{Bandwidth: "1000"}),
+			wantErr: `bandwidth "1000"`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -346,3 +370,11 @@ func TestIsolationJSONRoundTrip(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// shapingState wraps sh in an otherwise-valid state.
+func shapingState(sh Shaping) State {
+	sh.Name = "shape"
+	sh.Target = &Selector{All: true}
+	sh.Scope = []string{ScopeControl}
+	return State{Shaping: []Shaping{sh}}
+}

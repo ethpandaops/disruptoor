@@ -41,6 +41,8 @@ func main() {
 type runFlags struct {
 	addr            string
 	enclaveID       string
+	allowUnscoped   bool
+	allowedHosts    []string
 	enclaveLabelKey string
 	labelPrefix     string
 	logLevel        string
@@ -65,6 +67,10 @@ func newRoot() *cobra.Command {
 		"HTTP listen address")
 	root.PersistentFlags().StringVar(&f.enclaveID, "enclave-id", "",
 		"Override enclave UUID; if empty, learnt from self-container labels")
+	root.PersistentFlags().BoolVar(&f.allowUnscoped, "allow-unscoped", false,
+		"Start even when the enclave cannot be determined; every Kurtosis container on the host becomes a target")
+	root.PersistentFlags().StringSliceVar(&f.allowedHosts, "allowed-hosts", nil,
+		"Extra Host header names allowed to reach the API (IPs, localhost, *.localhost and single-label names always are); \"*\" allows any")
 	root.PersistentFlags().StringVar(&f.enclaveLabelKey, "enclave-label-key",
 		discovery.DefaultEnclaveLabelKey,
 		"Docker label key whose value identifies the enclave")
@@ -117,6 +123,7 @@ func run(ctx context.Context, f runFlags) error {
 	disc, err := discovery.NewService(logger, discovery.Config{
 		EnclaveLabelKey:   f.enclaveLabelKey,
 		EnclaveLabelValue: f.enclaveID,
+		AllowUnscoped:     f.allowUnscoped,
 		LabelPrefix:       f.labelPrefix,
 	})
 	if err != nil {
@@ -168,13 +175,14 @@ func run(ctx context.Context, f runFlags) error {
 	}
 
 	apiSvc, err := api.NewService(logger, api.Config{
-		Addr:        f.addr,
-		Discovery:   disc,
-		Iptables:    iptSvc,
-		TC:          tcSvc,
-		Conntrack:   ctSvc,
-		OnEvent:     onEventFn,
-		ExtraRoutes: extraRoutes,
+		Addr:         f.addr,
+		Discovery:    disc,
+		Iptables:     iptSvc,
+		TC:           tcSvc,
+		Conntrack:    ctSvc,
+		OnEvent:      onEventFn,
+		ExtraRoutes:  extraRoutes,
+		AllowedHosts: f.allowedHosts,
 	})
 	if err != nil {
 		return fmt.Errorf("api: %w", err)
@@ -211,6 +219,7 @@ func run(ctx context.Context, f runFlags) error {
 		logger.InfoContext(ctx, "applied initial state from --config",
 			slog.String("path", f.configPath),
 			slog.Int("partitions", len(initial.Partitions)),
+			slog.Int("isolations", len(initial.Isolations)),
 			slog.Int("shaping", len(initial.Shaping)))
 	}
 

@@ -184,7 +184,8 @@ Anything declarable here is also expressible via the runtime API. Static config 
 
 ## Scenarios it can model
 
-- N-way partitions (2, 3, 4+ groups; isolate one node).
+- N-way partitions (2, 3, 4+ groups).
+- Isolating one node (or a group of nodes) from the rest of the enclave.
 - Symmetric N-way splits; asymmetric splits are future work.
 - Per-node shaping (delay, jitter, loss, bandwidth); per-edge shaping, dup, and reorder are future work.
 - Per-layer scope (CL p2p only, EL p2p only, both).

@@ -85,6 +85,7 @@
         "name": { "type": "string", "minLength": 1 },
         "target": {
           "$ref": "#/$defs/selector",
+          "not": { "const": "all" },
           "description": "Must be a label-match object; the literal \"all\" is rejected because isolating everything leaves nothing to isolate from."
         },
         "scope": {
@@ -117,10 +118,10 @@
           "enum": ["egress"],
           "description": "v0: only egress is supported. Ingress/both require ifb redirects (not implemented)."
         },
-        "delay":     { "type": "string", "description": "Go duration, e.g. \"200ms\"." },
-        "jitter":    { "type": "string", "description": "Go duration; requires delay." },
-        "loss":      { "type": "string", "description": "Percent string, e.g. \"5%\"." },
-        "bandwidth": { "type": "string", "description": "Rate string, e.g. \"1mbit\"." }
+        "delay":     { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?([uU][sS]([eE][cC][sS]?)?|[mM][sS]([eE][cC][sS]?)?|[sS]([eE][cC][sS]?)?)$", "description": "tc time, e.g. \"200ms\" (units us, ms, s)." },
+        "jitter":    { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?([uU][sS]([eE][cC][sS]?)?|[mM][sS]([eE][cC][sS]?)?|[sS]([eE][cC][sS]?)?)$", "description": "tc time; requires delay." },
+        "loss":      { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?%?$", "description": "Percentage up to 100, e.g. \"5%\"." },
+        "bandwidth": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?([kKmMgGtT][iI]?)?([bB][iI][tT]|[bB][pP][sS])$", "description": "tc rate, e.g. \"10mbit\"." }
       },
       "anyOf": [
         { "required": ["delay"] },

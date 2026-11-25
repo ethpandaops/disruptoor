@@ -51,6 +51,10 @@ type Config struct {
 	// registered on the internal mux. Lets a caller (e.g. cmd/disruptoor) mount
 	// the webui on the same listener so the browser can call /v1/* same-origin.
 	ExtraRoutes func(mux *http.ServeMux)
+	// AllowedHosts lists extra Host header values (without port) accepted
+	// on top of IP literals, localhost, *.localhost and single-label names.
+	// "*" accepts any Host. See hostAllowed.
+	AllowedHosts []string
 	// OnEvent, if non-nil, is invoked synchronously after every state-mutation
 	// attempt (apply success/failure or clear). Implementations must not block.
 	OnEvent func(Event)
@@ -130,7 +134,7 @@ func (s *service) Start(ctx context.Context) error {
 
 	s.srv = &http.Server{
 		Addr:              s.cfg.Addr,
-		Handler:           s.logRequests(mux),
+		Handler:           s.logRequests(s.guard(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -202,7 +206,11 @@ func (s *service) handleGetState(w http.ResponseWriter, _ *http.Request) {
 func (s *service) handlePutState(w http.ResponseWriter, r *http.Request) {
 	var desired state.State
 	if err := decodeState(r.Body, &desired); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("decode body: %w", err))
+		status := http.StatusBadRequest
+		if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeError(w, status, fmt.Errorf("decode body: %w", err))
 		return
 	}
 	if err := desired.Validate(); err != nil {
@@ -486,6 +494,20 @@ func (s *service) resolvePartitions(ctx context.Context, ps []state.Partition) (
 // ResolvedPartition means the conntrack and iptables backends need no
 // isolation-specific code paths.
 func (s *service) resolveIsolations(ctx context.Context, isos []state.Isolation) ([]backend.ResolvedPartition, error) {
+	if len(isos) == 0 {
+		return nil, nil
+	}
+	// Unscoped discovery sees every Kurtosis container on the host, so the
+	// complement would silently reach into other enclaves.
+	if s.cfg.Discovery.EnclaveID() == "" {
+		return nil, errors.New("isolations require enclave-scoped discovery; set --enclave-id")
+	}
+	// One snapshot for every isolation: each resolve inspects the whole
+	// enclave while s.mu is held, and per-isolation snapshots could disagree.
+	everyone, err := s.cfg.Discovery.Resolve(ctx, state.Selector{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("resolve enclave containers: %w", err)
+	}
 	defaultScope := []string{"cl_p2p", "el_p2p"}
 	out := make([]backend.ResolvedPartition, 0, len(isos))
 	for _, iso := range isos {
@@ -496,10 +518,6 @@ func (s *service) resolveIsolations(ctx context.Context, isos []state.Isolation)
 		}
 		if len(target) == 0 {
 			return nil, fmt.Errorf("isolation %q: target matched no containers", iso.Name)
-		}
-		everyone, err := s.cfg.Discovery.Resolve(ctx, state.Selector{All: true})
-		if err != nil {
-			return nil, fmt.Errorf("isolation %q: resolve enclave containers: %w", iso.Name, err)
 		}
 		rest := subtractContainers(everyone, target)
 		if len(rest) == 0 {
@@ -551,6 +569,57 @@ func subtractContainers(from, remove []discovery.Container) []discovery.Containe
 		out = append(out, c)
 	}
 	return out
+}
+
+// maxRequestBodyBytes caps every request body; real states are a few KiB.
+const maxRequestBodyBytes = 1 << 20
+
+// guard protects the unauthenticated API (and the web UI on the same mux)
+// from browsers: the Host allowlist defeats DNS rebinding, and
+// CrossOriginProtection rejects cross-site state changes (CSRF), including
+// text/plain "simple requests" that skip CORS preflight. Non-browser
+// clients such as curl and assertoor send no Origin or Sec-Fetch-Site
+// headers and pass through.
+func (s *service) guard(next http.Handler) http.Handler {
+	csrf := http.NewCrossOriginProtection().Handler(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host, s.cfg.AllowedHosts) {
+			writeError(w, http.StatusForbidden,
+				fmt.Errorf("host %q not allowed; add it with --allowed-hosts", r.Host))
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+		csrf.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether a request's Host header may reach the API.
+// A DNS rebinding attack needs a public domain name the attacker controls,
+// so IP literals, localhost and single-label names (Docker service names
+// such as "disruptoor") are always safe.
+func hostAllowed(host string, allowed []string) bool {
+	if host == "" {
+		return true
+	}
+	h := host
+	if hp, _, err := net.SplitHostPort(host); err == nil {
+		h = hp
+	}
+	h = strings.TrimSuffix(strings.ToLower(strings.Trim(h, "[]")), ".")
+	if net.ParseIP(h) != nil || h == "localhost" || strings.HasSuffix(h, ".localhost") ||
+		!strings.Contains(h, ".") {
+		return true
+	}
+	for _, a := range allowed {
+		a = strings.TrimSuffix(strings.TrimSpace(a), ".")
+		if hp, _, err := net.SplitHostPort(a); err == nil {
+			a = hp
+		}
+		if a == "*" || strings.EqualFold(a, h) {
+			return true
+		}
+	}
+	return false
 }
 
 // statusRecorder wraps http.ResponseWriter to capture the status code that
