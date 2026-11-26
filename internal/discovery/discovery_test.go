@@ -119,7 +119,12 @@ func TestParsePorts(t *testing.T) {
 		},
 		{name: "missing colon", input: "metrics9001/TCP", wantErr: true},
 		{name: "missing protocol", input: "metrics:9001", wantErr: true},
-		{name: "bad protocol", input: "metrics:9001/SCTP", wantErr: true},
+		{name: "bad protocol", input: "metrics:9001/FOO", wantErr: true},
+		{
+			name:  "sctp skipped",
+			input: "sigtran:2905/SCTP,rpc:8545/TCP",
+			want:  []Port{{Name: "rpc", Number: 8545, Protocol: "TCP"}},
+		},
 		{name: "bad port", input: "metrics:abc/TCP", wantErr: true},
 		{name: "out of range", input: "metrics:99999/TCP", wantErr: true},
 	}
@@ -134,4 +139,17 @@ func TestParsePorts(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestSelfIDFromMountinfo(t *testing.T) {
+	const self = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+	const other = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	lines := []string{
+		"480 478 0:152 / / rw,relatime master:122 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/abc/diff",
+		// Another container's mount listed before ours must not win.
+		"590 480 0:60 /var/lib/docker/containers/" + other + "/mounts/shm /dev/shm rw - tmpfs shm rw",
+		"600 480 0:160 /var/lib/docker/containers/" + self + "/hostname /etc/hostname rw - ext4 /dev/sda1 rw",
+	}
+	assert.Equal(t, self, selfIDFromMountinfo(lines))
+	assert.Empty(t, selfIDFromMountinfo(lines[:2]), "no /etc/hostname mount, no self ID")
 }

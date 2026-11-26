@@ -443,6 +443,86 @@
         });
     }
 
+    // ---- Isolation modal ---------------------------------------------------
+
+    function initIsolationModal() {
+        const modal = document.getElementById("addIsolationModal");
+        const form = document.getElementById("isolation-add-form");
+        const targetSlot = document.getElementById("isolation-target");
+        const warning = document.getElementById("isolation-discovery-warning");
+        if (!modal || !form || !targetSlot) return;
+
+        let targetBuilder = null;
+
+        modal.addEventListener("show.bs.modal", () => {
+            form.reset();
+            targetSlot.innerHTML = "";
+            // reset() unchecks the default-checked scope boxes; re-tick them.
+            for (const v of ["cl_p2p", "el_p2p"]) {
+                const cb = form.querySelector('input[name="scope"][value="' + v + '"]');
+                if (cb) cb.checked = true;
+            }
+            targetBuilder = newBuilder({ title: "Target", removable: false });
+            if (targetBuilder) {
+                // "All containers" is not a valid isolation target — the
+                // complement would be empty. Drop the mode option entirely.
+                const modeSel = targetBuilder.card.querySelector('[data-role="mode"]');
+                const allOpt = modeSel ? modeSel.querySelector('option[value="all"]') : null;
+                if (allOpt) allOpt.remove();
+                targetSlot.appendChild(targetBuilder.card);
+            }
+
+            if (warning) {
+                warning.classList.add("d-none");
+                warning.textContent = "";
+                fetchDiscovery()
+                    .then((d) => {
+                        if (d.containers.length === 0) {
+                            warning.textContent =
+                                "Heads up: discovery returned 0 containers. The 'Specific containers' picker will be empty.";
+                            warning.classList.remove("d-none");
+                        }
+                    })
+                    .catch((err) => {
+                        warning.textContent = "Discovery failed: " + err.message;
+                        warning.classList.remove("d-none");
+                    });
+            }
+        });
+
+        form.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            const name = form.querySelector('[name="name"]').value.trim();
+            if (!name) {
+                flash("danger", "Isolation name required.");
+                return;
+            }
+            if (!targetBuilder) {
+                flash("danger", "Target missing.");
+                return;
+            }
+            const tr = targetBuilder.serialize();
+            if (!tr.ok) {
+                flash("danger", "Target: " + tr.error);
+                return;
+            }
+            const scope = Array.from(form.querySelectorAll('input[name="scope"]:checked')).map((cb) => cb.value);
+            const iso = { name: name, target: tr.value };
+            if (scope.length > 0) iso.scope = scope;
+            try {
+                const cur = await fetchState();
+                const state = cur.state;
+                state.isolations = state.isolations || [];
+                state.isolations.push(iso);
+                await applyState(state, cur.etag);
+                flash("success", 'Added isolation "' + name + '".');
+                reloadPage();
+            } catch (err) {
+                flash("danger", "Add failed: " + err.message);
+            }
+        });
+    }
+
     // ---- Shaping modal -----------------------------------------------------
 
     function initShapingModal() {
@@ -523,7 +603,7 @@
         document.querySelectorAll('[data-action="clear-all"]').forEach(function (btn) {
             btn.addEventListener("click", async function (ev) {
                 ev.preventDefault();
-                if (!confirm("Clear all active partitions and shaping rules?")) {
+                if (!confirm("Clear all active partitions, isolations, and shaping rules?")) {
                     return;
                 }
                 try {
@@ -549,6 +629,8 @@
                     const state = cur.state;
                     if (kind === "partition") {
                         state.partitions = (state.partitions || []).filter(p => p.name !== name);
+                    } else if (kind === "isolation") {
+                        state.isolations = (state.isolations || []).filter(i => i.name !== name);
                     } else if (kind === "shaping") {
                         state.shaping = (state.shaping || []).filter(s => s.name !== name);
                     }
@@ -583,6 +665,7 @@
         }
 
         initPartitionModal();
+        initIsolationModal();
         initShapingModal();
     });
 

@@ -56,10 +56,13 @@ type Config struct {
 	// enclave. Defaults to DefaultEnclaveLabelKey.
 	EnclaveLabelKey string
 	// EnclaveLabelValue scopes every query. If empty, Service.Start tries to
-	// discover it from its own container labels. If self-discovery fails,
-	// the service runs unscoped and logs a loud warning — useful for
-	// non-Kurtosis test harnesses.
+	// discover it from its own container labels. If that fails, Start
+	// returns an error unless AllowUnscoped is set.
 	EnclaveLabelValue string
+	// AllowUnscoped lets Start succeed without an enclave scope. Every query
+	// then spans all Kurtosis user-services on the host, across enclaves;
+	// only meant for non-Kurtosis test harnesses.
+	AllowUnscoped bool
 	// LabelPrefix is prepended to selector keys without a dot. Defaults to
 	// DefaultLabelPrefix.
 	LabelPrefix string
@@ -127,9 +130,21 @@ type service struct {
 	cli       *client.Client
 	cfg       Config
 	enclaveID string
+	// selfID is disruptoor's own container ID when known. Resolve never
+	// returns it, so no selector (including "all" and isolation
+	// complements) installs rules into disruptoor's own netns.
+	selfID string
 }
 
 func (s *service) Start(ctx context.Context) error {
+	selfID, selfLabels, selfErr := s.inspectSelf(ctx)
+	if selfErr == nil {
+		s.selfID = selfID
+	} else if s.cfg.EnclaveLabelValue != "" {
+		s.logger.WarnContext(ctx, "own container not found; it is not excluded from targets",
+			slog.String("error", selfErr.Error()))
+	}
+
 	if s.cfg.EnclaveLabelValue != "" {
 		s.enclaveID = s.cfg.EnclaveLabelValue
 		s.logger.InfoContext(ctx, "scoped to enclave from config",
@@ -137,35 +152,43 @@ func (s *service) Start(ctx context.Context) error {
 		return nil
 	}
 
-	selfID := s.cfg.SelfContainerID
-	if selfID == "" {
-		id, err := readSelfContainerID()
-		if err != nil {
-			s.logger.WarnContext(ctx, "self-container detection failed; running unscoped",
-				slog.String("error", err.Error()))
-			return nil
-		}
-		selfID = id
-	}
-
-	insp, err := s.cli.ContainerInspect(ctx, selfID)
-	if err != nil {
-		s.logger.WarnContext(ctx, "self container inspect failed; running unscoped",
-			slog.String("self_id", selfID),
-			slog.String("error", err.Error()))
-		return nil
-	}
-	if v, ok := insp.Config.Labels[s.cfg.EnclaveLabelKey]; ok && v != "" {
+	var reason error
+	switch v := selfLabels[s.cfg.EnclaveLabelKey]; {
+	case selfErr != nil:
+		reason = selfErr
+	case v == "":
+		reason = fmt.Errorf("self container %s has no %s label", selfID, s.cfg.EnclaveLabelKey)
+	default:
 		s.enclaveID = v
 		s.logger.InfoContext(ctx, "scoped to enclave from self labels",
 			slog.String("enclave_id", v),
 			slog.String("label_key", s.cfg.EnclaveLabelKey))
 		return nil
 	}
-	s.logger.WarnContext(ctx, "self container has no enclave label; running unscoped",
-		slog.String("self_id", selfID),
-		slog.String("label_key", s.cfg.EnclaveLabelKey))
+
+	if !s.cfg.AllowUnscoped {
+		return fmt.Errorf("cannot determine enclave (%w); pass --enclave-id, or --allow-unscoped to act on every Kurtosis container on this host", reason)
+	}
+	s.logger.WarnContext(ctx, "running unscoped: every Kurtosis user-service on this host is a target",
+		slog.String("reason", reason.Error()))
 	return nil
+}
+
+// inspectSelf finds and inspects disruptoor's own container.
+func (s *service) inspectSelf(ctx context.Context) (string, map[string]string, error) {
+	selfID := s.cfg.SelfContainerID
+	if selfID == "" {
+		id, err := readSelfContainerID()
+		if err != nil {
+			return "", nil, fmt.Errorf("self-container detection: %w", err)
+		}
+		selfID = id
+	}
+	insp, err := s.cli.ContainerInspect(ctx, selfID)
+	if err != nil {
+		return "", nil, fmt.Errorf("inspect self container %s: %w", selfID, err)
+	}
+	return insp.ID, insp.Config.Labels, nil
 }
 
 func (s *service) Stop() error {
@@ -199,6 +222,9 @@ func (s *service) Resolve(ctx context.Context, sel state.Selector) ([]Container,
 	out := make([]Container, 0, len(listed))
 	for i := range listed {
 		summary := &listed[i]
+		if summary.ID == s.selfID {
+			continue
+		}
 		if !sel.All && !labelsMatch(s.qualifyMatch(sel.Match), summary.Labels) {
 			continue
 		}
@@ -313,8 +339,11 @@ func readSelfContainerID() (string, error) {
 		return "", fmt.Errorf("read /etc/hostname: %w", err)
 	}
 	id := strings.TrimSpace(string(host))
-	if id == "" {
-		return "", errors.New("/etc/hostname empty")
+	// Docker's default hostname is the short container ID. Anything else
+	// (a custom hostname, or the host's name under network_mode: host)
+	// could name an unrelated container, which Resolve would then hide.
+	if !shortIDRe.MatchString(id) {
+		return "", fmt.Errorf("/etc/hostname %q is not a container ID", id)
 	}
 	return id, nil
 }
@@ -384,6 +413,11 @@ func parsePorts(label string) ([]Port, error) {
 			return nil, fmt.Errorf("entry %q: %w", raw, err)
 		}
 		proto := strings.ToUpper(parts[1])
+		if proto == "SCTP" {
+			// Valid in Kurtosis, but no scope covers it; skipping keeps one
+			// SCTP-exposing container from failing every "all" resolve.
+			continue
+		}
 		if proto != "TCP" && proto != "UDP" {
 			return nil, fmt.Errorf("entry %q: unknown protocol %q", raw, proto)
 		}
@@ -409,7 +443,10 @@ func parsePortNumber(s string) (uint16, error) {
 	return uint16(n), nil
 }
 
-var containerIDRe = regexp.MustCompile(`(?:docker[/-]|containers/)([0-9a-f]{64})`)
+var (
+	containerIDRe = regexp.MustCompile(`(?:docker[/-]|containers/)([0-9a-f]{64})`)
+	shortIDRe     = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
+)
 
 func scanMountinfo() (string, error) {
 	f, err := os.Open("/proc/self/mountinfo")
@@ -417,11 +454,30 @@ func scanMountinfo() (string, error) {
 		return "", err
 	}
 	defer f.Close()
+	var lines []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		if m := containerIDRe.FindStringSubmatch(scanner.Text()); m != nil {
-			return m[1], nil
-		}
+		lines = append(lines, scanner.Text())
+	}
+	if id := selfIDFromMountinfo(lines); id != "" {
+		return id, nil
 	}
 	return "", errors.New("no container id in mountinfo")
+}
+
+// selfIDFromMountinfo returns the container ID from the line that mounts
+// /etc/hostname, which Docker bind-mounts from the container's own
+// directory. Other lines can name other containers (e.g. their shm mounts
+// when disruptoor runs on the host), so they are ignored.
+func selfIDFromMountinfo(lines []string) string {
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 5 || fields[4] != "/etc/hostname" {
+			continue
+		}
+		if m := containerIDRe.FindStringSubmatch(fields[3]); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }

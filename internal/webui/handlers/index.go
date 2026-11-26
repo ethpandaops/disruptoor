@@ -11,8 +11,10 @@ import (
 type IndexPage struct {
 	EnclaveID       string
 	PartitionsCount int
+	IsolationsCount int
 	ShapingCount    int
 	Partitions      []state.Partition
+	Isolations      []state.Isolation
 	Shaping         []state.Shaping
 	RecentEvents    []api.Event // up to 5, newest first
 }
@@ -23,8 +25,10 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	page := &IndexPage{
 		EnclaveID:       h.discovery.EnclaveID(),
 		PartitionsCount: len(cur.Partitions),
+		IsolationsCount: len(cur.Isolations),
 		ShapingCount:    len(cur.Shaping),
 		Partitions:      cur.Partitions,
+		Isolations:      cur.Isolations,
 		Shaping:         cur.Shaping,
 	}
 	if h.events != nil {

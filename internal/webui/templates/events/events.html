@@ -36,10 +36,10 @@
                     <td>
                       {{ if .Error }}
                         <span class="text-danger">{{ .Error }}</span>
-                      {{ else if or .State.Partitions .State.Shaping }}
+                      {{ else if or .State.Partitions .State.Isolations .State.Shaping }}
                         <details>
                           <summary class="small text-muted">
-                            {{ len .State.Partitions }} partition(s), {{ len .State.Shaping }} shaping
+                            {{ len .State.Partitions }} partition(s), {{ len .State.Isolations }} isolation(s), {{ len .State.Shaping }} shaping
                           </summary>
                           <pre class="mt-1">{{ json .State }}</pre>
                         </details>

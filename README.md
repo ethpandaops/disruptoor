@@ -45,8 +45,8 @@ curl -X PUT http://localhost:7700/v1/state \
       {
         "name": "alpha-vs-bravo",
         "groups": [
-          {"id": "alpha"},
-          {"id": "bravo"}
+          {"com.kurtosistech.id": "alpha"},
+          {"com.kurtosistech.id": "bravo"}
         ]
       }
     ]
@@ -58,6 +58,44 @@ Verify it bit (alpha can no longer reach bravo's discovery port):
 ```bash
 docker exec disruptoor-test-alpha nc -vz 172.30.0.11 30303
 ```
+
+(Selector keys without a dot get the `com.kurtosistech.custom.ethereum-package.`
+prefix, e.g. `{"node-index": "1"}`; the test containers only carry the
+fully-qualified `com.kurtosistech.id` label.)
+
+Or isolate a single container from **everything else** without enumerating the
+counterparties. The complement of `target` is computed when the state is
+applied, so a container added later is only covered after the next `PUT`:
+
+```bash
+curl -X PUT http://localhost:7700/v1/state \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "isolations": [
+      {
+        "name": "blackout-alpha",
+        "target": {"com.kurtosistech.id": "alpha"},
+        "scope": ["cl_p2p", "el_p2p", "include_control"]
+      }
+    ]
+  }'
+```
+
+An isolation is semantically a symmetric two-group partition of `target` vs
+the rest of the enclave. "The rest" is every other user-service in the
+enclave, including non-node services such as dora or assertoor; disruptoor's
+own container is never a target. `scope` defaults to `[cl_p2p, el_p2p]`; add
+`include_control` to also cut RPC/engine/metrics/VC↔CL traffic (a full
+blackout, which also hides the target's APIs from those observers). The
+target must not match every container, since there'd be nothing left to
+isolate from. Isolations need an enclave-scoped disruptoor (see below).
+
+A target matching multiple containers is isolated **as a group**: traffic
+among its members keeps flowing. That suits "island" scenarios, e.g. cutting
+all beacon nodes off from their EL/VC stacks while they still gossip with
+each other; that one needs `include_control`, since beacon↔EL/VC traffic is
+on control ports. To black out several containers individually, declare one
+isolation per container.
 
 Heal everything:
 
@@ -100,6 +138,30 @@ services:
       - --enclave-id=<your-enclave-uuid>
 ```
 
+disruptoor scopes itself to one enclave: `--enclave-id`, or the enclave label
+on its own container when it runs inside Kurtosis. If it can't work out its
+enclave it refuses to start, because unscoped it would act on every Kurtosis
+container on the host; pass `--allow-unscoped` only for non-Kurtosis
+harnesses.
+
+### Security
+
+The API has no authentication: anything that can reach the port, including
+every container on the enclave network, can change the disruption state.
+Don't publish it beyond hosts you trust. Two browser attacks are blocked:
+
+- **Cross-site requests (CSRF):** state changes from another site's page
+  are rejected with `403`, using Go's `http.CrossOriginProtection`. The web
+  UI is same-origin and unaffected; curl and other non-browser clients send
+  no `Origin` and pass.
+- **DNS rebinding:** requests are only accepted for `Host` values that a
+  remote site can't control: IP addresses, `localhost`, `*.localhost`,
+  and single-label names such as `disruptoor`. To reach it under another
+  hostname, pass `--allowed-hosts=my-box.example.org` (comma
+  separated; `*` disables the check).
+
+Request bodies are capped at 1 MiB.
+
 ## Web UI
 
 When disruptoor is running, point a browser at the same `--addr` to access an
@@ -107,7 +169,7 @@ embedded control panel (Bootstrap, no external CDN). The UI shares the listener
 with the v1 API and lets you:
 
 - See the current applied state at a glance
-- Add or remove partitions and shaping rules without crafting JSON by hand
+- Add or remove partitions, isolations and shaping rules without crafting JSON by hand
 - List the Kurtosis containers the discovery service can resolve
 - Browse an in-memory event log of every applied / cleared / failed apply
 - Edit and PUT the raw state as JSON
@@ -115,7 +177,7 @@ with the v1 API and lets you:
 | Path           | Purpose                                       |
 |----------------|-----------------------------------------------|
 | `/`            | Dashboard summary + recent events             |
-| `/partitions`  | Active partitions, plus an Add modal          |
+| `/partitions`  | Active partitions and isolations, with Add modals |
 | `/shaping`     | Active shaping rules, plus an Add modal       |
 | `/containers`  | All containers visible in the enclave         |
 | `/events`      | Mutation log (ring buffer, clears on restart) |

@@ -49,10 +49,13 @@ func TestRoutesRenderWithoutError(t *testing.T) {
 		sentinel string // substring expected in the response body
 	}{
 		{"/", "Dashboard"},
+		{"/", "blackout-node-1"},
 		{"/partitions", "Partitions"},
+		{"/partitions", "blackout-node-1"},
 		{"/shaping", "Shaping"},
 		{"/containers", "Containers"},
 		{"/events", "Events"},
+		{"/events", "1 isolation(s)"}, // isolation-only apply is not "empty state"
 		{"/state", "Apply"},
 		{"/css/layout.css", "header-bar"},
 		{"/js/disruptoor.js", "disruptoor.js"},
@@ -141,6 +144,7 @@ func (f *fakeState) GetState() state.State {
 				{Match: map[string][]string{"id": {"bravo"}}},
 			},
 		}},
+		Isolations: []state.Isolation{isolationNode1},
 		Shaping: []state.Shaping{{
 			Name:   "jitter-all",
 			Target: &state.Selector{All: true},
@@ -170,7 +174,13 @@ func (f *fakeEvents) Snapshot() []api.Event {
 	return []api.Event{{
 		Kind:   api.EventApplied,
 		Source: "test",
+		State:  state.State{Isolations: []state.Isolation{isolationNode1}},
 	}}
+}
+
+var isolationNode1 = state.Isolation{
+	Name:   "blackout-node-1",
+	Target: &state.Selector{Match: map[string][]string{"node-index": {"1"}}},
 }
 
 // testWriter routes slog output into t.Log so test failures include the

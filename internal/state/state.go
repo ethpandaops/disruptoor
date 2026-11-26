@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 )
 
 // Scope values control which port classes a disruption applies to. The
@@ -30,9 +32,17 @@ const (
 	DirectionEgress = "egress"
 )
 
+// Accepted shaping value formats, a subset of what tc parses.
+var (
+	tcTimeRe = regexp.MustCompile(`(?i)^\d+(\.\d+)?(us|usec|usecs|ms|msec|msecs|s|sec|secs)$`)
+	lossRe   = regexp.MustCompile(`^(\d+(?:\.\d+)?)%?$`)
+	tcRateRe = regexp.MustCompile(`(?i)^\d+(\.\d+)?([kmgt]i?)?(bit|bps)$`)
+)
+
 // State is the full desired disruption state for an enclave.
 type State struct {
 	Partitions []Partition `json:"partitions,omitempty"`
+	Isolations []Isolation `json:"isolations,omitempty"`
 	Shaping    []Shaping   `json:"shaping,omitempty"`
 }
 
@@ -44,6 +54,23 @@ type Partition struct {
 	Groups    []Selector `json:"groups"`
 	Scope     []string   `json:"scope,omitempty"`
 	Symmetric *bool      `json:"symmetric,omitempty"`
+}
+
+// Isolation cuts the containers matched by Target off from the rest of the
+// enclave. The counterparty set ("everyone else") is computed at apply time
+// as the complement of Target, so callers don't enumerate it — a Partition
+// cannot express this because its groups must be disjoint and there is no
+// negation selector. Semantically an isolation is a symmetric two-group
+// partition: Target vs the rest of the enclave.
+//
+// When Target matches more than one container, the matched set is isolated
+// AS A GROUP: traffic among its members is unaffected. To black out several
+// containers individually (no traffic between them either), declare one
+// isolation per container.
+type Isolation struct {
+	Name   string    `json:"name"`
+	Target *Selector `json:"target,omitempty"`
+	Scope  []string  `json:"scope,omitempty"`
 }
 
 // Shaping describes per-target link degradation: delay, jitter, loss,
@@ -90,10 +117,19 @@ func (p Partition) EffectiveScope(defaultScope []string) []string {
 	return defaultScope
 }
 
+// EffectiveScope returns the scope list for this isolation, applying the
+// default if unset.
+func (iso Isolation) EffectiveScope(defaultScope []string) []string {
+	if len(iso.Scope) > 0 {
+		return iso.Scope
+	}
+	return defaultScope
+}
+
 // Validate runs structural checks on a State. Returns the first error found
 // or nil. Does not check against live Docker state — that happens at apply.
 func (s State) Validate() error {
-	names := make(map[string]struct{}, len(s.Partitions)+len(s.Shaping))
+	names := make(map[string]struct{}, len(s.Partitions)+len(s.Isolations)+len(s.Shaping))
 	for i, p := range s.Partitions {
 		if err := p.validate(); err != nil {
 			return fmt.Errorf("partitions[%d] (%q): %w", i, p.Name, err)
@@ -102,6 +138,15 @@ func (s State) Validate() error {
 			return fmt.Errorf("partitions[%d]: duplicate name %q", i, p.Name)
 		}
 		names[p.Name] = struct{}{}
+	}
+	for i, iso := range s.Isolations {
+		if err := iso.validate(); err != nil {
+			return fmt.Errorf("isolations[%d] (%q): %w", i, iso.Name, err)
+		}
+		if _, dup := names[iso.Name]; dup {
+			return fmt.Errorf("isolations[%d]: duplicate name %q", i, iso.Name)
+		}
+		names[iso.Name] = struct{}{}
 	}
 	for i, sh := range s.Shaping {
 		if err := sh.validate(); err != nil {
@@ -184,6 +229,27 @@ func (p Partition) validate() error {
 	return nil
 }
 
+func (iso Isolation) validate() error {
+	if iso.Name == "" {
+		return errors.New("name required")
+	}
+	if iso.Target == nil {
+		return errors.New("target required")
+	}
+	if iso.Target.All {
+		return errors.New(`target cannot be "all": isolating every container leaves nothing to isolate from`)
+	}
+	if len(iso.Target.Match) == 0 {
+		return errors.New("target: empty selector")
+	}
+	for _, sc := range iso.Scope {
+		if sc != ScopeCLP2P && sc != ScopeELP2P && sc != ScopeControl {
+			return fmt.Errorf("unknown scope %q", sc)
+		}
+	}
+	return nil
+}
+
 func (sh Shaping) validate() error {
 	if sh.Name == "" {
 		return errors.New("name required")
@@ -205,6 +271,29 @@ func (sh Shaping) validate() error {
 		// netem silently drops jitter when no delay is set; reject to
 		// avoid the user thinking jitter is being applied.
 		return errors.New("jitter requires delay")
+	}
+	// Reject malformed values with a 400 here instead of a tc failure (and
+	// full rollback) at apply time. jitter is its own tc argument, so it
+	// could otherwise smuggle in a bare netem keyword such as "ecn".
+	for _, f := range []struct{ field, value, want string }{
+		{"delay", sh.Delay, "a duration like 50ms"},
+		{"jitter", sh.Jitter, "a duration like 10ms"},
+	} {
+		if f.value != "" && !tcTimeRe.MatchString(f.value) {
+			return fmt.Errorf("%s %q: want %s (units us, ms, s)", f.field, f.value, f.want)
+		}
+	}
+	if sh.Loss != "" {
+		m := lossRe.FindStringSubmatch(sh.Loss)
+		if m == nil {
+			return fmt.Errorf("loss %q: want a percentage like 5%%", sh.Loss)
+		}
+		if pct, _ := strconv.ParseFloat(m[1], 64); pct > 100 {
+			return fmt.Errorf("loss %q: above 100%%", sh.Loss)
+		}
+	}
+	if sh.Bandwidth != "" && !tcRateRe.MatchString(sh.Bandwidth) {
+		return fmt.Errorf("bandwidth %q: want a rate like 10mbit", sh.Bandwidth)
 	}
 	if len(sh.Scope) != 1 || sh.Scope[0] != ScopeControl {
 		return fmt.Errorf("v0 tc shaping affects all egress traffic; set scope=[%q] to acknowledge",
